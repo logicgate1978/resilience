@@ -1,0 +1,151 @@
+import csv
+import json
+import os
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import boto3
+import requests
+import yaml
+
+
+def utc_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+def pretty(obj: Any) -> str:
+    return json.dumps(obj, indent=2, sort_keys=True, default=str)
+
+
+def normalize_service_name(name: str) -> str:
+    n = (name or "").strip().lower()
+    # allow "network (vpc)" style
+    if "network" in n or "vpc" in n:
+        return "network"
+    return n
+
+
+def parse_tags(tags_str: Optional[str]) -> Dict[str, str]:
+    """
+    Convert "k1=v1,k2=v2" into {"k1":"v1","k2":"v2"} (AND semantics).
+    """
+    if not tags_str:
+        return {}
+    out: Dict[str, str] = {}
+    parts = [p.strip() for p in tags_str.split(",") if p.strip()]
+    for p in parts:
+        if "=" not in p:
+            raise ValueError(f"Invalid tag '{p}'. Expected format key=value.")
+        k, v = p.split("=", 1)
+        k, v = k.strip(), v.strip()
+        if not k or not v:
+            raise ValueError(f"Invalid tag '{p}'. Expected format key=value.")
+        out[k] = v
+    return out
+
+
+def load_manifest(path: str) -> Dict[str, Any]:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Manifest not found: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        raise ValueError("manifest.yml must be a YAML mapping/object at top level.")
+    return data
+
+
+def get_account_id(sts_client) -> str:
+    return sts_client.get_caller_identity()["Account"]
+
+
+def sanitize_filename(s: str, max_len: int = 120) -> str:
+    s = (s or "").strip()
+    if not s:
+        return "unknown"
+    s = re.sub(r"[^A-Za-z0-9._-]+", "_", s)
+    return s[:max_len].strip("._-") or "unknown"
+
+
+def append_csv_row(path: str, header: List[str], row: Dict[str, Any]) -> None:
+    file_exists = os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        if not file_exists:
+            w.writeheader()
+        w.writerow(row)
+
+
+def resolve_iam_role_arns_from_names(role_names_csv: str) -> List[str]:
+    """
+    Resolve IAM role names -> role ARNs via boto3 IAM get_role.
+    role_names_csv: "BAU,Admin,scb-user-instance-role"
+    """
+    names = [x.strip() for x in (role_names_csv or "").split(",") if x.strip()]
+    if not names:
+        return []
+    iam = boto3.client("iam")  # global
+    arns: List[str] = []
+    for n in names:
+        resp = iam.get_role(RoleName=n)
+        arns.append(resp["Role"]["Arn"])
+    return arns
+
+
+def apply_site_scope_to_target(target: Dict[str, Any], resource_type: str, zone: str) -> None:
+    """
+    If resilience_test_type=site, add filters/parameters to scope target resources to the AZ.
+    """
+    if resource_type == "aws:ec2:instance":
+        target.setdefault("filters", [])
+        target["filters"].append({"path": "Placement.AvailabilityZone", "values": [zone]})
+    elif resource_type == "aws:ec2:subnet":
+        target.setdefault("parameters", {})
+        target["parameters"]["availabilityZoneIdentifier"] = zone
+    elif resource_type == "aws:rds:cluster":
+        target.setdefault("parameters", {})
+        target["parameters"]["writerAvailabilityZoneIdentifiers"] = zone
+    elif resource_type == "aws:rds:db":
+        target.setdefault("parameters", {})
+        target["parameters"]["availabilityZoneIdentifiers"] = zone
+    elif resource_type == "aws:ec2:autoscaling-group":
+        target.setdefault("filters", [])
+        target["filters"].append({"path": "AvailabilityZones", "values": [zone]})
+
+
+def get_ssm_parameter_str(region, name):
+    ssm_client = boto3.client('ssm', region_name=region)
+    response = ssm_client.get_parameters(Names=[name], WithDecryption=True)
+    return response['Parameters'][0]['Value']
+
+
+def upload_files_to_artifactory(filenames):
+    # configure API credentials
+    artifactory_api_key = get_ssm_parameter_str('eu-west-1', '/app/azure_cmdb/development/azure_cmdb/artifactory_api_key')
+    artifactory_username, api_key = artifactory_api_key.split(':')
+
+    # upload files to Artifactory
+    print('===== uploading files to Artifactory')
+    auth = (artifactory_username, api_key)
+    artifactory_url = 'https://artifactory.global.standardchartered.com/artifactory/generic-cloud/com/sc/cloud/deploy/release/inventory/monthly-summary-report'
+
+    for filename in filenames:
+        artifactory_filename = filename.replace('/tmp/', '')
+        if artifactory_filename == filename:
+            artifactory_filename = os.path.basename(filename)
+        url = artifactory_url + '/' + artifactory_filename
+        print(f'===== artifactory_filename: {artifactory_filename}')
+        print(f'===== url: {url}')
+
+        with open(filename, 'rb') as fobj:
+            res = requests.put(url, auth=auth, data=fobj)
+            print(f'===== res: {res}')
+
+            if res.ok:
+                print(f'===== SUCCESS!! File has been uploaded successfully to Artifactory: {url}')
+            else:
+                print(f'===== FAIL!! There was an error while uploading the file to Artifactory: {url}')
