@@ -1,0 +1,6 @@
+resilience_test_type: component
+region: ap-southeast-1
+services:
+- name: ec2
+  action: stop
+  tags: environment=development,project=clouddash

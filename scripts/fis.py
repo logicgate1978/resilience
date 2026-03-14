@@ -69,7 +69,7 @@ def summarize_experiment(exp: Dict[str, Any]) -> Dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default='../manifests/component-1.yml', help="Path to manifest.yml")
-    ap.add_argument("--fis-role-arn", default='arn:aws:iam::649387772696:role/service-role/AWSFISIAMRole-1736750292560', help="FIS IAM role ARN (required unless --dry-run)")
+    ap.add_argument("--fis-role-arn", default='arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063', help="FIS IAM role ARN (required unless --dry-run)")
     ap.add_argument("--outdir", default="fis_out", help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--poll-seconds", type=int, default=10, help="Polling interval while waiting for experiment")
