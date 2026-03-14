@@ -74,7 +74,7 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--poll-seconds", type=int, default=10, help="Polling interval while waiting for experiment")
     ap.add_argument("--timeout-seconds", type=int, default=3600, help="Timeout per experiment in seconds")
-    ap.add_argument("--upload-artifactory", default=True, action="store_true", help="Upload generated HTML report to Artifactory")
+    ap.add_argument("--upload-artifactory", default=False, action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
 
     manifest = load_manifest(args.manifest)
