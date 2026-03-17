@@ -8,6 +8,18 @@ services:
 - name: rds
   action: reboot
   tags: environment=development,project=clouddash
+- name: eks
+  action: delete-pod
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=my-service
+    count: 1
+  parameters:
+    kubernetes_service_account: myserviceaccount
+    grace_period_seconds: 0
+    max_errors_percent: 0
 observability:
   start_before: 2
   stop_after: 2

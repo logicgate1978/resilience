@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
 
@@ -14,6 +14,7 @@ class ManifestService:
     iam_role_arns: Optional[List[str]] = None
     iam_roles: Optional[str] = None
     instance_count: Optional[int] = None
+    config: Dict[str, Any] = field(default_factory=dict)
 
 
 def build_target(
@@ -23,11 +24,16 @@ def build_target(
     selection_mode: str,
     resource_tags: Optional[Dict[str, str]] = None,
     resource_arns: Optional[List[str]] = None,
+    resource_parameters: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     t: Dict[str, Any] = {"resourceType": resource_type, "selectionMode": selection_mode}
 
     if resource_arns is not None:
         t["resourceArns"] = resource_arns
+        return t
+
+    if resource_parameters:
+        t["parameters"] = resource_parameters
         return t
 
     if resource_tags:
@@ -69,6 +75,11 @@ class ServiceTemplateGenerator(ABC):
         return default_selection_mode
 
     def get_resource_arns(self, *, manifest: Dict[str, Any], svc: ManifestService) -> Optional[List[str]]:
+        _ = manifest
+        _ = svc
+        return None
+
+    def get_target_parameters(self, *, manifest: Dict[str, Any], svc: ManifestService) -> Optional[Dict[str, str]]:
         _ = manifest
         _ = svc
         return None

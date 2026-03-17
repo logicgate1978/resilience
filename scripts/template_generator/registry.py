@@ -77,6 +77,7 @@ def _parse_manifest_services(manifest: Dict[str, Any]) -> List[ManifestService]:
                 iam_role_arns=iam_role_arns,
                 iam_roles=iam_roles,
                 instance_count=instance_count,
+                config=dict(s),
             )
         )
 
@@ -115,6 +116,7 @@ def generate_template_payload(
         target_key = spec["target_key"]
 
         resource_arns = generator.get_resource_arns(manifest=manifest, svc=svc)
+        resource_parameters = generator.get_target_parameters(manifest=manifest, svc=svc)
         this_selection_mode = generator.get_selection_mode(
             manifest=manifest,
             svc=svc,
@@ -128,6 +130,7 @@ def generate_template_payload(
             selection_mode=this_selection_mode,
             resource_tags=parse_tags(svc.tags) if (resource_arns is None) else None,
             resource_arns=resource_arns,
+            resource_parameters=resource_parameters,
         )
 
         generator.apply_site_scope(
