@@ -206,6 +206,7 @@ def _build_arc_execution_item(
         "action": action,
         "use_arc": True,
         "planControlRegion": primary_region,
+        "target": target,
         "payload": {
             "name": plan_name,
             "description": plan_description,
@@ -317,6 +318,12 @@ def _execute_arc_item(
         poll_seconds=poll_seconds,
         timeout_seconds=timeout_seconds,
     )
+    final_state = _wait_for_global_db_ready(
+        session=session,
+        target=item["target"],
+        poll_seconds=poll_seconds,
+        timeout_seconds=timeout_seconds,
+    )
 
     return {
         "name": item["name"],
@@ -324,13 +331,14 @@ def _execute_arc_item(
         "status": final_execution.get("executionState"),
         "reason": final_execution.get("comment"),
         "startTime": final_execution.get("startTime") or start_time,
-        "endTime": final_execution.get("endTime"),
+        "endTime": datetime.now(timezone.utc).isoformat(),
         "details": {
             "planArn": plan_arn,
             "executionId": execution_id,
             "payload": item["payload"],
             "request": item["request"],
             "rawExecution": final_execution,
+            "finalGlobalDbState": final_state,
         },
     }
 
@@ -352,10 +360,9 @@ def _execute_sdk_item(
 
     sdk_api = getattr(client, request["sdkApi"])
     response = sdk_api(**request["params"])
-    final_state = _wait_for_global_cluster_role(
-        client=client,
-        global_cluster_identifier=item["target"]["global_cluster_identifier"],
-        target_cluster_arn=item["target"]["member_cluster_arns"][item["targetRegion"]],
+    final_state = _wait_for_global_db_ready(
+        session=session,
+        target=item["target"],
         poll_seconds=poll_seconds,
         timeout_seconds=timeout_seconds,
     )
@@ -434,6 +441,92 @@ def _wait_for_global_cluster_role(
                 f"within {timeout_seconds}s."
             )
         time.sleep(poll_seconds)
+
+
+def _wait_for_global_db_ready(
+    session,
+    target: Dict[str, Any],
+    poll_seconds: int = 10,
+    timeout_seconds: int = 3600,
+) -> Dict[str, Any]:
+    member_cluster_arns = target["member_cluster_arns"]
+    primary_region = target["primary_region"]
+    secondary_region = target["secondary_region"]
+    target_region = secondary_region if str(target["from"]) == "primary" else primary_region
+    target_cluster_arn = member_cluster_arns[target_region]
+    control_client = session.client("rds", region_name=target_region)
+
+    start = time.time()
+    while True:
+        global_cluster = _wait_for_global_cluster_role_once(
+            client=control_client,
+            global_cluster_identifier=target["global_cluster_identifier"],
+            target_cluster_arn=target_cluster_arn,
+        )
+
+        cluster_states: Dict[str, Dict[str, Any]] = {}
+        all_available = True
+        for region, cluster_arn in member_cluster_arns.items():
+            rds_client = session.client("rds", region_name=region)
+            cluster = _describe_db_cluster_by_arn(rds_client, cluster_arn)
+            cluster_states[region] = cluster
+            status = str(cluster.get("Status") or "").strip().lower()
+            if status != "available":
+                all_available = False
+
+        if global_cluster is not None and all_available:
+            return {
+                "globalCluster": global_cluster,
+                "clusters": cluster_states,
+            }
+
+        if time.time() - start > timeout_seconds:
+            raise TimeoutError(
+                "Aurora global database did not reach a fully available state in both Regions "
+                f"within {timeout_seconds}s."
+            )
+
+        time.sleep(poll_seconds)
+
+
+def _wait_for_global_cluster_role_once(
+    client,
+    global_cluster_identifier: str,
+    target_cluster_arn: str,
+) -> Dict[str, Any]:
+    response = client.describe_global_clusters(GlobalClusterIdentifier=global_cluster_identifier)
+    global_clusters = response.get("GlobalClusters") or []
+    if not global_clusters:
+        return {}
+
+    global_cluster = global_clusters[0]
+    status = str(global_cluster.get("Status") or "").strip().lower()
+    members = global_cluster.get("GlobalClusterMembers") or []
+    target_is_writer = any(
+        m.get("DBClusterArn") == target_cluster_arn and bool(m.get("IsWriter"))
+        for m in members
+    )
+    if status == "available" and target_is_writer:
+        return global_cluster
+    return {}
+
+
+def _describe_db_cluster_by_arn(rds_client, cluster_arn: str) -> Dict[str, Any]:
+    cluster_identifier = _cluster_identifier_from_arn(cluster_arn)
+    response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_identifier)
+    clusters = response.get("DBClusters") or []
+    if not clusters:
+        raise ValueError(f"DB cluster not found for ARN: {cluster_arn}")
+    return clusters[0]
+
+
+def _cluster_identifier_from_arn(cluster_arn: str) -> str:
+    marker = ":cluster:"
+    if marker not in cluster_arn:
+        raise ValueError(f"Invalid DB cluster ARN: {cluster_arn}")
+    return cluster_arn.split(marker, 1)[1]
+
+
 
 
 def _source_region(manifest: Dict[str, Any], from_side: str) -> str:

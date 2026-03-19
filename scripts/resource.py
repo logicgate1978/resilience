@@ -309,6 +309,8 @@ def discover_rds_global_clusters(
                     "from": str(svc.get("from") or "").strip().lower(),
                     "use_arc": bool(svc.get("use_arc", True)),
                     "selection_mode": "ALL",
+                    "primary_region": primary_region,
+                    "secondary_region": secondary_region,
                     "global_cluster_identifier": str(global_cluster.get("GlobalClusterIdentifier") or ""),
                     "global_cluster_arn": global_cluster_arn,
                     "member_cluster_arns": {
