@@ -10,13 +10,10 @@ import botocore
 from fis_template_generator import create_template, generate_template_payload
 from observability import parse_observability, start_observability_collectors
 from region_switch import (
-    build_plan_payload,
-    create_plan as create_region_switch_plan,
+    build_execution_plan,
+    execute_region_plan,
     resolve_region_targets,
-    start_plan_execution,
-    summarize_plan_execution,
     validate_region_manifest,
-    wait_for_plan_execution,
 )
 from resource import collect_impacted_resources
 from utility import ensure_dir, load_manifest, pretty, upload_files_to_artifactory
@@ -114,42 +111,29 @@ def main() -> int:
         print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
 
         arc_role_arn = args.arc_role_arn or ("REPLACE_ME" if args.dry_run else "")
-        if not args.dry_run and not arc_role_arn:
-            raise ValueError("--arc-role-arn is required for region tests unless --dry-run")
-
-        payload, execution_request = build_plan_payload(
+        execution_plan = build_execution_plan(
             manifest=manifest,
             execution_role_arn=arc_role_arn,
             resolved_targets=resolved_targets,
         )
-        plan_name = payload["name"]
+        plan_name = execution_plan["name"]
         report_filename = _get_report_filename(plan_name)
 
-        payload_path = os.path.join(args.outdir, f"plan_payload_{plan_name}.json")
-        with open(payload_path, "w", encoding="utf-8") as f:
-            f.write(pretty(payload))
-        print(f"[OK] Wrote ARC plan payload JSON: {payload_path}")
-
-        resolved_targets_path = os.path.join(args.outdir, f"resolved_targets_{plan_name}.json")
-        with open(resolved_targets_path, "w", encoding="utf-8") as f:
-            f.write(pretty({"resolved_targets": resolved_targets, "execution_request": execution_request}))
-        print(f"[OK] Wrote resolved target JSON: {resolved_targets_path}")
+        execution_plan_path = os.path.join(args.outdir, f"region_execution_plan_{plan_name}.json")
+        with open(execution_plan_path, "w", encoding="utf-8") as f:
+            f.write(pretty(execution_plan))
+        print(f"[OK] Wrote region execution plan JSON: {execution_plan_path}")
 
         if args.dry_run:
             print("[INFO] Dry-run enabled: skipping create/execute.")
             return 0
 
-        region_switch_client = session.client("arc-region-switch", region_name=primary_region)
         stop_event: Optional[Any] = None
         obs_results: Optional[Dict[str, Any]] = None
         obs_threads: List[Any] = []
         report_path: Optional[str] = None
 
         try:
-            plan = create_region_switch_plan(region_switch_client, payload)
-            plan_arn = plan["arn"]
-            print(f"[OK] Created ARC Region switch plan: {plan_arn}")
-
             stop_event, obs_results, obs_threads = start_observability_collectors(
                 manifest=manifest,
                 session=session,
@@ -166,24 +150,12 @@ def main() -> int:
                 print(f"[INFO] start_before={start_before_min} minutes: waiting before starting region switch...")
                 time.sleep(start_before_min * 60)
 
-            execution = start_plan_execution(region_switch_client, plan_arn, execution_request)
-            execution_id = execution["executionId"]
-            print(f"[OK] Started ARC Region switch executionId: {execution_id}")
-
-            final_execution = wait_for_plan_execution(
-                region_switch_client,
-                plan_arn,
-                execution_id,
+            summary = execute_region_plan(
+                session=session,
+                execution_plan=execution_plan,
                 poll_seconds=args.poll_seconds,
                 timeout_seconds=args.timeout_seconds,
             )
-            summary = summarize_plan_execution(final_execution)
-            summary["regionSwitch"] = {
-                "planArn": plan_arn,
-                "planName": plan_name,
-                "resolvedTargets": resolved_targets,
-                "executionRequest": execution_request,
-            }
 
             if stop_after_min > 0:
                 print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")

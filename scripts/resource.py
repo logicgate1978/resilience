@@ -307,6 +307,7 @@ def discover_rds_global_clusters(
                     "service": _service_label(name, action),
                     "action": action,
                     "from": str(svc.get("from") or "").strip().lower(),
+                    "use_arc": bool(svc.get("use_arc", True)),
                     "selection_mode": "ALL",
                     "global_cluster_identifier": str(global_cluster.get("GlobalClusterIdentifier") or ""),
                     "global_cluster_arn": global_cluster_arn,

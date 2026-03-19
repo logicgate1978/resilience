@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
 from utility import utc_ts
@@ -6,16 +7,30 @@ from utility import utc_ts
 from resource import discover_rds_global_clusters
 
 
-REGION_ACTION_CONFIG: Dict[str, Dict[str, str]] = {
+REGION_ACTION_CONFIG: Dict[str, Dict[str, Any]] = {
     "failover-global-db": {
-        "behavior": "failover",
-        "mode": "ungraceful",
-        "description": "Fail over Aurora global database with ARC Region switch",
+        "arc": {
+            "behavior": "failover",
+            "mode": "ungraceful",
+            "description": "Fail over Aurora global database with ARC Region switch",
+        },
+        "non_arc": {
+            "engine": "sdk",
+            "sdk_api": "failover_global_cluster",
+            "description": "Fail over Aurora global database with the RDS SDK",
+        },
     },
     "switchover-global-db": {
-        "behavior": "switchoverOnly",
-        "mode": "graceful",
-        "description": "Switchover Aurora global database with ARC Region switch",
+        "arc": {
+            "behavior": "switchoverOnly",
+            "mode": "graceful",
+            "description": "Switchover Aurora global database with ARC Region switch",
+        },
+        "non_arc": {
+            "engine": "sdk",
+            "sdk_api": "switchover_global_cluster",
+            "description": "Switchover Aurora global database with the RDS SDK",
+        },
     },
 }
 
@@ -44,6 +59,7 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
         from_side = (svc.get("from") or "").strip().lower()
+        use_arc = svc.get("use_arc", True)
 
         if name != "rds" or action not in REGION_ACTION_CONFIG:
             raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
@@ -51,6 +67,8 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
             raise ValueError(f"services[{i}].from must be 'primary' or 'secondary'.")
         if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
             raise ValueError(f"services[{i}].tags is required for Aurora global database discovery.")
+        if not isinstance(use_arc, bool):
+            raise ValueError(f"services[{i}].use_arc must be true or false when provided.")
 
 
 def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, Any]]:
@@ -58,35 +76,118 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
     return discover_rds_global_clusters(manifest=manifest, session=session)
 
 
-def build_plan_payload(
+def build_execution_plan(
     manifest: Dict[str, Any],
     execution_role_arn: str,
     resolved_targets: List[Dict[str, Any]],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Dict[str, Any]:
     validate_region_manifest(manifest)
 
-    if not execution_role_arn:
-        raise ValueError("ARC region switch requires an execution role ARN.")
-    if len(resolved_targets) != 1:
-        raise ValueError("Current region switch implementation expects exactly one resolved target.")
+    plan_name = f"region-run-{utc_ts()}".lower()
+    items: List[Dict[str, Any]] = []
+    for idx, target in enumerate(resolved_targets, start=1):
+        use_arc = bool(target.get("use_arc", True))
+        if use_arc:
+            if not execution_role_arn:
+                raise ValueError("ARC region switch requires an execution role ARN when use_arc=true.")
+            item = _build_arc_execution_item(manifest, target, execution_role_arn, idx)
+        else:
+            item = _build_non_arc_execution_item(manifest, target, idx)
+        items.append(item)
 
+    if not items:
+        raise ValueError("No region execution items were resolved from the manifest.")
+
+    return {
+        "name": plan_name,
+        "description": "Region resilience execution plan",
+        "resolvedTargets": resolved_targets,
+        "items": items,
+    }
+
+
+def execute_region_plan(
+    session,
+    execution_plan: Dict[str, Any],
+    poll_seconds: int = 10,
+    timeout_seconds: int = 3600,
+) -> Dict[str, Any]:
+    item_summaries: List[Dict[str, Any]] = []
+
+    for item in execution_plan["items"]:
+        if item["engine"] == "arc":
+            item_summary = _execute_arc_item(
+                session=session,
+                item=item,
+                poll_seconds=poll_seconds,
+                timeout_seconds=timeout_seconds,
+            )
+        elif item["engine"] == "sdk":
+            item_summary = _execute_sdk_item(
+                session=session,
+                item=item,
+                poll_seconds=poll_seconds,
+                timeout_seconds=timeout_seconds,
+            )
+        else:
+            raise ValueError(f"Unsupported region execution engine: {item['engine']}")
+
+        item_summaries.append(item_summary)
+
+    overall_status = "completed"
+    if any(s["status"] not in ("completed", "completedWithExceptions") for s in item_summaries):
+        overall_status = "failed"
+    elif any(s["status"] == "completedWithExceptions" for s in item_summaries):
+        overall_status = "completedWithExceptions"
+
+    start_times = [s["startTime"] for s in item_summaries if s.get("startTime")]
+    end_times = [s["endTime"] for s in item_summaries if s.get("endTime")]
+
+    summary = {
+        "experimentId": execution_plan["name"],
+        "experimentTemplateId": execution_plan["name"],
+        "status": overall_status,
+        "reason": "region resilience execution",
+        "startTime": min(start_times) if start_times else None,
+        "endTime": max(end_times) if end_times else None,
+        "actions": {},
+        "regionSwitch": {
+            "executionPlan": execution_plan,
+            "items": item_summaries,
+        },
+    }
+
+    for item_summary in item_summaries:
+        summary["actions"][item_summary["name"]] = {
+            "status": item_summary["status"],
+            "reason": item_summary["reason"],
+            "startTime": item_summary["startTime"],
+            "endTime": item_summary["endTime"],
+        }
+
+    return summary
+
+
+def _build_arc_execution_item(
+    manifest: Dict[str, Any],
+    target: Dict[str, Any],
+    execution_role_arn: str,
+    index: int,
+) -> Dict[str, Any]:
     primary_region = manifest["primary_region"]
     secondary_region = manifest["secondary_region"]
-    target = resolved_targets[0]
+    action = str(target["action"])
+    action_cfg = REGION_ACTION_CONFIG[action]["arc"]
+    from_side = str(target["from"])
+    target_region = _target_region(manifest, from_side)
 
-    action = str(target.get("action") or "").strip().lower()
-    action_cfg = REGION_ACTION_CONFIG[action]
-    from_side = str(target.get("from") or "").strip().lower()
-    target_region = secondary_region if from_side == "primary" else primary_region
-
-    short_ts = utc_ts()
-    plan_name = f"rs-rds-{short_ts}".lower()
+    plan_name = f"rs-rds-{index}-{utc_ts()}".lower()
     plan_description = (
-        f"{action} from {from_side} using Aurora global database "
-        f"{target.get('global_cluster_identifier')}"
+        f"{action} from {from_side} using ARC for Aurora global database "
+        f"{target['global_cluster_identifier']}"
     )
+    step_name = f"rds-{action}-{index}".replace("_", "-")
 
-    step_name = f"rds-{action}".replace("_", "-")
     global_aurora_config: Dict[str, Any] = {
         "behavior": action_cfg["behavior"],
         "globalClusterIdentifier": target["global_cluster_identifier"],
@@ -98,58 +199,184 @@ def build_plan_payload(
     if action_cfg["mode"] == "ungraceful":
         global_aurora_config["ungraceful"] = {"ungraceful": "failover"}
 
-    payload: Dict[str, Any] = {
-        "name": plan_name,
-        "description": plan_description,
-        "executionRole": execution_role_arn,
-        "regions": [primary_region, secondary_region],
-        "recoveryApproach": "activePassive",
-        "primaryRegion": primary_region,
-        "workflows": [
-            {
-                "workflowTargetAction": "activate",
-                "workflowTargetRegion": target_region,
-                "workflowDescription": plan_description,
-                "steps": [
-                    {
-                        "name": step_name,
-                        "description": action_cfg["description"],
-                        "executionBlockType": "AuroraGlobalDatabase",
-                        "executionBlockConfiguration": {
-                            "globalAuroraConfig": global_aurora_config,
-                        },
-                    }
-                ],
-            }
-        ],
-        "tags": {
-            "managed-by": "fis.py",
-            "resilience-test-type": "region",
-            "service": "rds",
-            "action": action,
+    return {
+        "name": step_name,
+        "engine": "arc",
+        "service": target["service"],
+        "action": action,
+        "use_arc": True,
+        "planControlRegion": primary_region,
+        "payload": {
+            "name": plan_name,
+            "description": plan_description,
+            "executionRole": execution_role_arn,
+            "regions": [primary_region, secondary_region],
+            "recoveryApproach": "activePassive",
+            "primaryRegion": primary_region,
+            "workflows": [
+                {
+                    "workflowTargetAction": "activate",
+                    "workflowTargetRegion": target_region,
+                    "workflowDescription": plan_description,
+                    "steps": [
+                        {
+                            "name": step_name,
+                            "description": action_cfg["description"],
+                            "executionBlockType": "AuroraGlobalDatabase",
+                            "executionBlockConfiguration": {
+                                "globalAuroraConfig": global_aurora_config,
+                            },
+                        }
+                    ],
+                }
+            ],
+            "tags": {
+                "managed-by": "fis.py",
+                "resilience-test-type": "region",
+                "service": "rds",
+                "action": action,
+            },
+        },
+        "request": {
+            "targetRegion": target_region,
+            "action": "activate",
+            "mode": action_cfg["mode"],
+            "comment": plan_description,
+            "latestVersion": "true",
         },
     }
 
-    execution_request = {
+
+def _build_non_arc_execution_item(
+    manifest: Dict[str, Any],
+    target: Dict[str, Any],
+    index: int,
+) -> Dict[str, Any]:
+    action = str(target["action"])
+    action_cfg = REGION_ACTION_CONFIG[action]["non_arc"]
+    from_side = str(target["from"])
+    source_region = _source_region(manifest, from_side)
+    target_region = _target_region(manifest, from_side)
+    target_cluster_arn = target["member_cluster_arns"][target_region]
+
+    if action == "failover-global-db":
+        client_region = target_region
+        params = {
+            "GlobalClusterIdentifier": target["global_cluster_identifier"],
+            "TargetDbClusterIdentifier": target_cluster_arn,
+            "AllowDataLoss": True,
+        }
+    elif action == "switchover-global-db":
+        client_region = source_region
+        params = {
+            "GlobalClusterIdentifier": target["global_cluster_identifier"],
+            "TargetDbClusterIdentifier": target_cluster_arn,
+        }
+    else:
+        raise ValueError(f"Unsupported non-ARC region action: {action}")
+
+    return {
+        "name": f"rds-{action}-{index}".replace("_", "-"),
+        "engine": action_cfg["engine"],
+        "service": target["service"],
+        "action": action,
+        "use_arc": False,
+        "clientRegion": client_region,
         "targetRegion": target_region,
-        "action": "activate",
-        "mode": action_cfg["mode"],
-        "comment": plan_description,
-        "latestVersion": "true",
+        "sourceRegion": source_region,
+        "request": {
+            "sdkApi": action_cfg["sdk_api"],
+            "params": params,
+            "description": action_cfg["description"],
+        },
+        "target": target,
     }
-    return payload, execution_request
 
 
-def create_plan(region_switch_client, payload: Dict[str, Any]) -> Dict[str, Any]:
-    return region_switch_client.create_plan(**payload)["plan"]
+def _execute_arc_item(
+    session,
+    item: Dict[str, Any],
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    client = session.client("arc-region-switch", region_name=item["planControlRegion"])
+    start_time = datetime.now(timezone.utc).isoformat()
+
+    plan = client.create_plan(**item["payload"])["plan"]
+    plan_arn = plan["arn"]
+    print(f"[OK] Created ARC Region switch plan: {plan_arn}")
+
+    execution = client.start_plan_execution(planArn=plan_arn, **item["request"])
+    execution_id = execution["executionId"]
+    print(f"[OK] Started ARC Region switch executionId: {execution_id}")
+
+    final_execution = _wait_for_arc_execution(
+        client=client,
+        plan_arn=plan_arn,
+        execution_id=execution_id,
+        poll_seconds=poll_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+
+    return {
+        "name": item["name"],
+        "engine": "arc",
+        "status": final_execution.get("executionState"),
+        "reason": final_execution.get("comment"),
+        "startTime": final_execution.get("startTime") or start_time,
+        "endTime": final_execution.get("endTime"),
+        "details": {
+            "planArn": plan_arn,
+            "executionId": execution_id,
+            "payload": item["payload"],
+            "request": item["request"],
+            "rawExecution": final_execution,
+        },
+    }
 
 
-def start_plan_execution(region_switch_client, plan_arn: str, execution_request: Dict[str, Any]) -> Dict[str, Any]:
-    return region_switch_client.start_plan_execution(planArn=plan_arn, **execution_request)
+def _execute_sdk_item(
+    session,
+    item: Dict[str, Any],
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    client = session.client("rds", region_name=item["clientRegion"])
+    start_time = datetime.now(timezone.utc).isoformat()
+    request = item["request"]
+
+    print(
+        f"[INFO] Starting non-ARC region action {item['action']} via {request['sdkApi']} "
+        f"in region {item['clientRegion']}"
+    )
+
+    sdk_api = getattr(client, request["sdkApi"])
+    response = sdk_api(**request["params"])
+    final_state = _wait_for_global_cluster_role(
+        client=client,
+        global_cluster_identifier=item["target"]["global_cluster_identifier"],
+        target_cluster_arn=item["target"]["member_cluster_arns"][item["targetRegion"]],
+        poll_seconds=poll_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+
+    return {
+        "name": item["name"],
+        "engine": "sdk",
+        "status": "completed",
+        "reason": f"{request['sdkApi']} in {item['clientRegion']}",
+        "startTime": start_time,
+        "endTime": datetime.now(timezone.utc).isoformat(),
+        "details": {
+            "request": request,
+            "initialResponse": response,
+            "finalGlobalClusterState": final_state,
+        },
+    }
 
 
-def wait_for_plan_execution(
-    region_switch_client,
+def _wait_for_arc_execution(
+    client,
     plan_arn: str,
     execution_id: str,
     poll_seconds: int = 10,
@@ -164,10 +391,7 @@ def wait_for_plan_execution(
     }
     start = time.time()
     while True:
-        execution = region_switch_client.get_plan_execution(
-            planArn=plan_arn,
-            executionId=execution_id,
-        )
+        execution = client.get_plan_execution(planArn=plan_arn, executionId=execution_id)
         status = execution.get("executionState", "unknown")
         if status in terminal:
             return execution
@@ -182,24 +406,39 @@ def wait_for_plan_execution(
         time.sleep(poll_seconds)
 
 
-def summarize_plan_execution(execution: Dict[str, Any]) -> Dict[str, Any]:
-    out = {
-        "experimentId": execution.get("executionId"),
-        "experimentTemplateId": execution.get("planArn"),
-        "status": execution.get("executionState"),
-        "reason": execution.get("comment"),
-        "startTime": execution.get("startTime"),
-        "endTime": execution.get("endTime"),
-        "actions": {},
-    }
+def _wait_for_global_cluster_role(
+    client,
+    global_cluster_identifier: str,
+    target_cluster_arn: str,
+    poll_seconds: int = 10,
+    timeout_seconds: int = 3600,
+) -> Dict[str, Any]:
+    start = time.time()
+    while True:
+        response = client.describe_global_clusters(GlobalClusterIdentifier=global_cluster_identifier)
+        global_clusters = response.get("GlobalClusters") or []
+        if global_clusters:
+            global_cluster = global_clusters[0]
+            status = str(global_cluster.get("Status") or "").strip().lower()
+            members = global_cluster.get("GlobalClusterMembers") or []
+            target_is_writer = any(
+                m.get("DBClusterArn") == target_cluster_arn and bool(m.get("IsWriter"))
+                for m in members
+            )
+            if status == "available" and target_is_writer:
+                return global_cluster
 
-    for step in execution.get("stepStates") or []:
-        name = step.get("name") or "step"
-        out["actions"][name] = {
-            "status": step.get("status"),
-            "reason": step.get("stepMode"),
-            "startTime": step.get("startTime"),
-            "endTime": step.get("endTime"),
-        }
+        if time.time() - start > timeout_seconds:
+            raise TimeoutError(
+                f"Global cluster {global_cluster_identifier} did not promote target {target_cluster_arn} "
+                f"within {timeout_seconds}s."
+            )
+        time.sleep(poll_seconds)
 
-    return out
+
+def _source_region(manifest: Dict[str, Any], from_side: str) -> str:
+    return manifest["primary_region"] if from_side == "primary" else manifest["secondary_region"]
+
+
+def _target_region(manifest: Dict[str, Any], from_side: str) -> str:
+    return manifest["secondary_region"] if from_side == "primary" else manifest["primary_region"]

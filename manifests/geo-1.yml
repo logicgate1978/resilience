@@ -6,6 +6,7 @@ services:
   action: failover-global-db
   tags: environment=development,project=clouddash
   from: primary
+  use_arc: false
 observability:
   start_before: 2
   stop_after: 2

@@ -193,7 +193,15 @@ Current region-switch support:
 - `rds:failover-global-db`
 - `rds:switchover-global-db`
 
-These actions are implemented with AWS ARC Region switch, not FIS.
+These actions can now be implemented in two ways:
+
+- ARC Region switch when `use_arc: true`
+- non-ARC custom implementation when `use_arc: false`
+
+The current non-ARC implementation for these RDS actions uses the boto3 RDS APIs:
+
+- `failover_global_cluster`
+- `switchover_global_cluster`
 
 ## Manifest Design
 
@@ -266,6 +274,7 @@ services:
   action: failover-global-db
   tags: environment=development,project=clouddash
   from: primary
+  use_arc: true
 observability:
   start_before: 2
   stop_after: 2
@@ -281,6 +290,8 @@ Notes on region manifests:
 - `from: primary` means switch away from the current primary Region into the secondary Region
 - `from: secondary` means switch back into the primary Region
 - tags are used for discovery; the user does not need to provide the Aurora Global Database ARN or member cluster ARNs
+- `use_arc` only applies to `resilience_test_type: region`
+- if `use_arc` is omitted, the current default behavior is `true`
 
 ## ARC Region Switch Design
 
@@ -290,7 +301,7 @@ The ARC path is intentionally separate from the FIS path.
 
 Aurora Global Database failover and switchover are orchestrated using ARC Region switch rather than a native FIS action in this codebase. That keeps regional orchestration separate from FIS experiment-template generation and makes it easier to grow into more sophisticated region-recovery workflows later.
 
-### Current ARC Implementation
+### Current Region Execution Implementation
 
 The current region path in `scripts/region_switch.py` does the following:
 
@@ -300,14 +311,33 @@ The current region path in `scripts/region_switch.py` does the following:
    - one global cluster identifier
    - one member cluster ARN in `primary_region`
    - one member cluster ARN in `secondary_region`
-4. creates an ARC plan with:
+4. builds a region execution plan
+5. selects the engine per service block:
+   - ARC when `use_arc = true`
+   - non-ARC custom execution when `use_arc = false`
+6. runs the selected engine and writes a unified summary for reporting
+
+### ARC Path
+
+When `use_arc = true`, the code:
+
+1. creates an ARC plan with:
    - `recoveryApproach = activePassive`
    - one workflow
    - one Aurora Global Database step
-5. starts execution with:
+2. starts execution with:
    - `activate`
    - `ungraceful` for `failover-global-db`
    - `graceful` for `switchover-global-db`
+
+### Non-ARC Path
+
+When `use_arc = false`, the code currently uses direct boto3 RDS APIs:
+
+- `rds.failover_global_cluster()` for `failover-global-db`
+- `rds.switchover_global_cluster()` for `switchover-global-db`
+
+This exists because native FIS support for Aurora Global Database failover and switchover is not assumed in this codebase. The framework is designed so a future region action can choose ARC or a different custom implementation without changing the manifest contract.
 
 ### Current Discovery Rules for Aurora Global Database
 
@@ -472,8 +502,7 @@ Both FIS and ARC flows write their summaries in this general shape so reporting 
 A typical run creates some or all of:
 
 - `template_payload_<name>.json`
-- `plan_payload_<name>.json`
-- `resolved_targets_<name>.json`
+- `region_execution_plan_<name>.json`
 - `impacted_resources.json`
 - `result_<name>.json`
 - `health_check.csv`
