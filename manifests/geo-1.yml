@@ -5,7 +5,7 @@ services:
 - name: rds
   action: failover-global-db
   tags: environment=development,project=clouddash
-  from: primary
+  from: secondary
   use_arc: false
 observability:
   start_before: 2
