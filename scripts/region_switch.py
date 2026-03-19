@@ -465,25 +465,45 @@ def _wait_for_global_db_ready(
         )
 
         cluster_states: Dict[str, Dict[str, Any]] = {}
+        member_states: Dict[str, Dict[str, Any]] = {}
         all_available = True
+        all_synchronized = True
+
+        if global_cluster:
+            for member in global_cluster.get("GlobalClusterMembers") or []:
+                cluster_arn = str(member.get("DBClusterArn") or "")
+                if cluster_arn in member_cluster_arns.values():
+                    member_states[cluster_arn] = member
+
         for region, cluster_arn in member_cluster_arns.items():
             rds_client = session.client("rds", region_name=region)
             cluster = _describe_db_cluster_by_arn(rds_client, cluster_arn)
             cluster_states[region] = cluster
-            status = str(cluster.get("Status") or "").strip().lower()
-            if status != "available":
+
+            cluster_status = str(cluster.get("Status") or "").strip().lower()
+            if cluster_status != "available":
                 all_available = False
 
-        if global_cluster is not None and all_available:
+            member = member_states.get(cluster_arn) or {}
+            is_writer = bool(member.get("IsWriter"))
+            sync_status = str(member.get("SynchronizationStatus") or "").strip().lower()
+
+            if not is_writer and sync_status != "connected":
+                all_synchronized = False
+            elif is_writer and sync_status not in ("", "connected"):
+                all_synchronized = False
+
+        if global_cluster and all_available and all_synchronized:
             return {
                 "globalCluster": global_cluster,
                 "clusters": cluster_states,
+                "members": member_states,
             }
 
         if time.time() - start > timeout_seconds:
             raise TimeoutError(
-                "Aurora global database did not reach a fully available state in both Regions "
-                f"within {timeout_seconds}s."
+                "Aurora global database did not reach a fully synchronized and available state "
+                f"in both Regions within {timeout_seconds}s."
             )
 
         time.sleep(poll_seconds)
@@ -501,12 +521,14 @@ def _wait_for_global_cluster_role_once(
 
     global_cluster = global_clusters[0]
     status = str(global_cluster.get("Status") or "").strip().lower()
+    failover_state = global_cluster.get("FailoverState") or {}
     members = global_cluster.get("GlobalClusterMembers") or []
     target_is_writer = any(
         m.get("DBClusterArn") == target_cluster_arn and bool(m.get("IsWriter"))
         for m in members
     )
-    if status == "available" and target_is_writer:
+    in_progress = bool(failover_state.get("Status"))
+    if status == "available" and target_is_writer and not in_progress:
         return global_cluster
     return {}
 
