@@ -17,6 +17,14 @@ require_command() {
   fi
 }
 
+ensure_curl() {
+  if command -v curl >/dev/null 2>&1; then
+    return
+  fi
+  echo "Installing curl-minimal..."
+  sudo dnf install -y curl-minimal
+}
+
 detect_arch() {
   local machine
   machine="$(uname -m)"
@@ -40,7 +48,7 @@ detect_arch() {
 
 install_os_packages() {
   echo "Installing base OS packages..."
-  sudo dnf install -y curl unzip tar gzip
+  sudo dnf install -y unzip tar gzip
 }
 
 install_aws_cli() {
@@ -79,11 +87,11 @@ print_versions() {
 main() {
   require_command sudo
   require_command dnf
-  require_command curl
   require_command uname
 
-  detect_arch
   install_os_packages
+  ensure_curl
+  detect_arch
   install_aws_cli
   install_kubectl
   install_eksctl
