@@ -40,6 +40,7 @@ Defaults:
 Behavior:
   - If --name is omitted, the script tries to read the last created cluster from commands/.state/last_eks_cluster.env
   - The deployment is labeled with app=<app-name> so it matches EKS pod-delete tests using labelSelector
+  - The script also creates Role and RoleBinding objects for FIS eks:pod-delete
 EOF
 }
 
@@ -134,6 +135,45 @@ metadata:
   name: ${SERVICE_ACCOUNT}
   namespace: ${NAMESPACE}
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${SERVICE_ACCOUNT}-fis-role
+  namespace: ${NAMESPACE}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "list", "get", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["pods/ephemeralcontainers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${SERVICE_ACCOUNT}-fis-binding
+  namespace: ${NAMESPACE}
+subjects:
+  - kind: ServiceAccount
+    name: ${SERVICE_ACCOUNT}
+    namespace: ${NAMESPACE}
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: fis-experiment
+roleRef:
+  kind: Role
+  name: ${SERVICE_ACCOUNT}-fis-role
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -197,3 +237,7 @@ echo "  target.namespace: ${NAMESPACE}"
 echo "  target.selector_type: labelSelector"
 echo "  target.selector_value: app=${APP_NAME}"
 echo "  parameters.kubernetes_service_account: ${SERVICE_ACCOUNT}"
+echo
+echo "The script also created:"
+echo "  Role: ${SERVICE_ACCOUNT}-fis-role"
+echo "  RoleBinding: ${SERVICE_ACCOUNT}-fis-binding"
