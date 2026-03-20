@@ -2,3 +2,4 @@
 __pycache__/
 *.pyc
 fis_out/
+commands/.state/
