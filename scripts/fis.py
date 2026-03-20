@@ -16,9 +16,38 @@ from region_switch import (
     validate_region_manifest,
 )
 from resource import collect_impacted_resources
-from utility import ensure_dir, load_manifest, pretty, upload_files_to_artifactory
+from utility import ensure_dir, load_env_file, load_manifest, parse_bool, pretty, upload_files_to_artifactory
 
 from chart import generate_report  # NEW
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+ENV_PATH = os.path.join(REPO_ROOT, ".env")
+
+
+def _env_value(env: Dict[str, str], key: str, fallback: str) -> str:
+    value = env.get(key)
+    if value is None or str(value).strip() == "":
+        return fallback
+    return str(value).strip()
+
+
+def _env_path(env: Dict[str, str], key: str, fallback: str) -> str:
+    value = _env_value(env, key, fallback)
+    if os.path.isabs(value):
+        return value
+    return os.path.normpath(os.path.join(REPO_ROOT, value))
+
+
+def _env_int(env: Dict[str, str], key: str, fallback: int) -> int:
+    value = env.get(key)
+    if value is None or str(value).strip() == "":
+        return fallback
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return fallback
 
 
 def start_experiment(fis_client, template_id: str) -> str:
@@ -78,15 +107,17 @@ def _get_report_filename(base_name: str) -> str:
 
 
 def main() -> int:
+    env_defaults = load_env_file(ENV_PATH)
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default='../manifests/geo-1.yml', help="Path to manifest.yml")
-    ap.add_argument("--fis-role-arn", default='arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063', help="FIS IAM role ARN (required unless --dry-run)")
-    ap.add_argument("--arc-role-arn", default="arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole", help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
-    ap.add_argument("--outdir", default="fis_out", help="Output directory for template/results JSON/CSVs")
+    ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "geo-1.yml")), help="Path to manifest.yml")
+    ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", 'arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063'), help="FIS IAM role ARN (required unless --dry-run)")
+    ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", "arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole"), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
+    ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
-    ap.add_argument("--poll-seconds", type=int, default=10, help="Polling interval while waiting for experiment")
-    ap.add_argument("--timeout-seconds", type=int, default=3600, help="Timeout per experiment in seconds")
-    ap.add_argument("--upload-artifactory", default=False, action="store_true", help="Upload generated HTML report to Artifactory")
+    ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
+    ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 3600), help="Timeout per experiment in seconds")
+    ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
 
     manifest = load_manifest(args.manifest)

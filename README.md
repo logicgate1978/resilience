@@ -511,6 +511,26 @@ A typical run creates some or all of:
 
 ## How to Run
 
+### Default Arguments from `.env`
+
+The repository root can contain a `.env` file with default values for `scripts/fis.py`.
+
+Current supported keys:
+
+- `MANIFEST`
+- `FIS_ROLE_ARN`
+- `ARC_ROLE_ARN`
+- `OUTDIR`
+- `POLL_SECONDS`
+- `TIMEOUT_SECONDS`
+- `UPLOAD_ARTIFACTORY`
+
+Behavior:
+
+- if a CLI argument is provided, it wins
+- if a CLI argument is omitted, `fis.py` falls back to `.env`
+- if the key is not present in `.env`, `fis.py` falls back to its hardcoded default
+
 ### Install Dependencies
 
 Dependencies are listed in `scripts/requirements.txt`.
