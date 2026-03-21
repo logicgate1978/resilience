@@ -7,7 +7,8 @@ DEFAULT_USERNAME="fis-experiment"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/.env"
-STATE_FILE="${SCRIPT_DIR}/.state/last_eks_cluster.env"
+STATE_FILE="${SCRIPT_DIR}/.state/current_eks_cluster.txt"
+LEGACY_STATE_FILE="${SCRIPT_DIR}/.state/last_eks_cluster.env"
 EKS_ACCESS_POLICY_ARN="arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
 FIS_EKS_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSFaultInjectionSimulatorEKSAccess"
 
@@ -29,7 +30,7 @@ Defaults:
 
 Behavior:
   - Reads FIS_ROLE_ARN from repo-root .env if --fis-role-arn is omitted
-  - Reads the last created cluster from commands/.state/last_eks_cluster.env if --name is omitted
+  - Reads the current cluster from commands/.state/current_eks_cluster.txt if --name is omitted
   - Attaches AWSFaultInjectionSimulatorEKSAccess to the IAM role
   - Creates or verifies an EKS access entry for the role using username fis-experiment
   - Associates AmazonEKSClusterAdminPolicy to the role on the cluster
@@ -55,6 +56,9 @@ load_state_if_present() {
   if [[ -f "${STATE_FILE}" ]]; then
     STATE_REGION="$(grep '^REGION=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
     STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
+  elif [[ -f "${LEGACY_STATE_FILE}" ]]; then
+    STATE_REGION="$(grep '^REGION=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
+    STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
   fi
 }
 

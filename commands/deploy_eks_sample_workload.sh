@@ -10,7 +10,8 @@ DEFAULT_REPLICAS="2"
 DEFAULT_IMAGE="public.ecr.aws/nginx/nginx:stable-alpine"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${SCRIPT_DIR}/.state"
-STATE_FILE="${STATE_DIR}/last_eks_cluster.env"
+STATE_FILE="${STATE_DIR}/current_eks_cluster.txt"
+LEGACY_STATE_FILE="${STATE_DIR}/last_eks_cluster.env"
 
 REGION=""
 CLUSTER_NAME=""
@@ -38,7 +39,7 @@ Defaults:
   image: public.ecr.aws/nginx/nginx:stable-alpine
 
 Behavior:
-  - If --name is omitted, the script tries to read the last created cluster from commands/.state/last_eks_cluster.env
+  - If --name is omitted, the script tries to read the current cluster from commands/.state/current_eks_cluster.txt
   - The deployment is labeled with app=<app-name> so it matches EKS pod-delete tests using labelSelector
   - The script also creates Role and RoleBinding objects for FIS eks:pod-delete
 EOF
@@ -64,6 +65,9 @@ load_state_if_present() {
   if [[ -f "${STATE_FILE}" ]]; then
     STATE_REGION="$(grep '^REGION=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
     STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
+  elif [[ -f "${LEGACY_STATE_FILE}" ]]; then
+    STATE_REGION="$(grep '^REGION=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
+    STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
   fi
 }
 

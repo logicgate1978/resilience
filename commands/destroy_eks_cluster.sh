@@ -5,7 +5,8 @@ set -euo pipefail
 DEFAULT_REGION="ap-southeast-1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${SCRIPT_DIR}/.state"
-STATE_FILE="${STATE_DIR}/last_eks_cluster.env"
+STATE_FILE="${STATE_DIR}/current_eks_cluster.txt"
+LEGACY_STATE_FILE="${STATE_DIR}/last_eks_cluster.env"
 
 REGION=""
 CLUSTER_NAME=""
@@ -21,7 +22,7 @@ Defaults:
   region: ap-southeast-1
 
 Behavior:
-  - If --name is omitted, the script tries to read the last created cluster from commands/.state/last_eks_cluster.env
+  - If --name is omitted, the script tries to read the current cluster from commands/.state/current_eks_cluster.txt
 EOF
 }
 
@@ -36,6 +37,9 @@ load_state_if_present() {
   if [[ -f "${STATE_FILE}" ]]; then
     STATE_REGION="$(grep '^REGION=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
     STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
+  elif [[ -f "${LEGACY_STATE_FILE}" ]]; then
+    STATE_REGION="$(grep '^REGION=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
+    STATE_CLUSTER_NAME="$(grep '^CLUSTER_NAME=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
   fi
 }
 
@@ -80,6 +84,13 @@ if [[ -f "${STATE_FILE}" ]]; then
   CURRENT_STATE_CLUSTER="$(grep '^CLUSTER_NAME=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
   if [[ "${CURRENT_STATE_CLUSTER}" == "${CLUSTER_NAME}" ]]; then
     rm -f "${STATE_FILE}"
+  fi
+fi
+
+if [[ -f "${LEGACY_STATE_FILE}" ]]; then
+  CURRENT_LEGACY_CLUSTER="$(grep '^CLUSTER_NAME=' "${LEGACY_STATE_FILE}" | cut -d'=' -f2- || true)"
+  if [[ "${CURRENT_LEGACY_CLUSTER}" == "${CLUSTER_NAME}" ]]; then
+    rm -f "${LEGACY_STATE_FILE}"
   fi
 fi
 

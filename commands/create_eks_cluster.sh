@@ -9,7 +9,7 @@ DEFAULT_NODE_COUNT="1"
 DEFAULT_VOLUME_SIZE="20"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${SCRIPT_DIR}/.state"
-STATE_FILE="${STATE_DIR}/last_eks_cluster.env"
+STATE_FILE="${STATE_DIR}/current_eks_cluster.txt"
 
 REGION="${DEFAULT_REGION}"
 CLUSTER_NAME="resilience-eks-$(date +%Y%m%d%H%M%S)"
