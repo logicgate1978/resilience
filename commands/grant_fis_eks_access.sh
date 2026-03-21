@@ -61,11 +61,13 @@ load_state_if_present() {
 role_name_from_arn() {
   local arn="$1"
   local prefix=":role/"
+  local role_path
   if [[ "${arn}" != *"${prefix}"* ]]; then
     echo "ERROR: Invalid IAM role ARN: ${arn}" >&2
     exit 1
   fi
-  echo "${arn#*${prefix}}"
+  role_path="${arn#*${prefix}}"
+  echo "${role_path##*/}"
 }
 
 policy_attached() {
