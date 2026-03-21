@@ -1,0 +1,19 @@
+resilience_test_type: component
+region: ap-southeast-1
+services:
+- name: eks
+  action: delete-pod
+  target:
+    # Replace this with your real EKS cluster name.
+    cluster_identifier: resilience-eks-20260320152420
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=my-service
+    count: 1
+  parameters:
+    kubernetes_service_account: myserviceaccount
+    grace_period_seconds: 0
+    max_errors_percent: 0
+observability:
+  start_before: 1
+  stop_after: 1
