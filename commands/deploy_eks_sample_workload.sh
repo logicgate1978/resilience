@@ -51,6 +51,15 @@ require_command() {
   fi
 }
 
+verify_resource() {
+  local kind="$1"
+  local name="$2"
+  if ! kubectl get "${kind}" "${name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+    echo "ERROR: Expected ${kind}/${name} was not found in namespace '${NAMESPACE}' after apply." >&2
+    exit 1
+  fi
+}
+
 load_state_if_present() {
   if [[ -f "${STATE_FILE}" ]]; then
     STATE_REGION="$(grep '^REGION=' "${STATE_FILE}" | cut -d'=' -f2- || true)"
@@ -219,6 +228,10 @@ spec:
       targetPort: 80
   type: ClusterIP
 EOF
+
+verify_resource serviceaccount "${SERVICE_ACCOUNT}"
+verify_resource role "${SERVICE_ACCOUNT}-fis-role"
+verify_resource rolebinding "${SERVICE_ACCOUNT}-fis-binding"
 
 kubectl rollout status deployment/"${APP_NAME}" -n "${NAMESPACE}" --timeout=300s
 
