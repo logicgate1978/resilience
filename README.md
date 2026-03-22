@@ -160,48 +160,21 @@ Responsibilities:
 
 ## Supported Capabilities
 
-### FIS-Based Service Actions
+| Action | Description | FIS/ARC action | Allowed Values |
+| --- | --- | --- | --- |
+| `ec2:pause-launch` | Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test. | `aws:ec2:api-insufficient-instance-capacity-error` | `pause-launch` |
+| `ec2:stop` | Stop selected EC2 instances and restart them after the configured duration. | `aws:ec2:stop-instances` | `stop` |
+| `ec2:reboot` | Reboot selected EC2 instances. | `aws:ec2:reboot-instances` | `reboot` |
+| `ec2:terminate` | Terminate selected EC2 instances. | `aws:ec2:terminate-instances` | `terminate` |
+| `rds:reboot` | Reboot selected RDS DB instances. | `aws:rds:reboot-db-instances` | `reboot` |
+| `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` | `failover` |
+| `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` | `pause-launch` |
+| `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` | `disrupt-connectivity` |
+| `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` | `delete-pod` |
+| `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` | `failover-global-db` |
+| `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` | `switchover-global-db` |
 
-Current FIS service/action support is split across service-specific generator files:
-
-- `ec2`
-  - `pause-launch`
-  - `stop`
-  - `reboot`
-  - `terminate`
-- `rds`
-  - `reboot`
-  - `failover`
-- `asg`
-  - `pause-launch`
-- `network`
-  - `disrupt-connectivity`
-- `eks`
-  - `delete-pod`
-
-Current placeholder generator files exist for:
-
-- `s3`
-- `efs`
-
-These files are scaffolds only. They do not currently define real actions.
-
-### ARC-Based Region Actions
-
-Current region-switch support:
-
-- `rds:failover-global-db`
-- `rds:switchover-global-db`
-
-These actions can now be implemented in two ways:
-
-- ARC Region switch when `use_arc: true`
-- non-ARC custom implementation when `use_arc: false`
-
-The current non-ARC implementation for these RDS actions uses the boto3 RDS APIs:
-
-- `failover_global_cluster`
-- `switchover_global_cluster`
+Current placeholder generator files still exist for `s3` and `efs`, but they are scaffolds only and do not currently define real actions.
 
 ## Manifest Design
 
