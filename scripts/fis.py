@@ -17,6 +17,7 @@ from region_switch import (
 )
 from resource import collect_impacted_resources
 from utility import ensure_dir, load_env_file, load_manifest, parse_bool, pretty, upload_files_to_artifactory
+from validations import ValidationError, validate_manifest_services
 
 from chart import generate_report  # NEW
 
@@ -240,6 +241,19 @@ def main() -> int:
     if not region:
         raise ValueError("manifest.yml must include top-level region")
 
+    session = boto3.Session(region_name=region)
+    zone = manifest.get("zone") if rtype == "site" else None
+    try:
+        validate_manifest_services(
+            manifest,
+            session=session,
+            region=region,
+            zone=zone,
+        )
+    except ValidationError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
     if args.dry_run:
         fis_role_arn = args.fis_role_arn or "REPLACE_ME"
     else:
@@ -256,8 +270,6 @@ def main() -> int:
     with open(template_json_path, "w", encoding="utf-8") as f:
         f.write(pretty(payload))
     print(f"[OK] Wrote template payload JSON: {template_json_path}")
-
-    session = boto3.Session(region_name=region)
 
     impacted_resources = collect_impacted_resources(
         manifest=manifest,

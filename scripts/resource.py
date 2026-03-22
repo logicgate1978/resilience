@@ -203,6 +203,42 @@ def _collect_iam_roles_from_service(svc: Dict[str, Any]) -> List[str]:
     return resolve_iam_role_arns_from_names("BAU,Admin,scb-user-instance-role")
 
 
+def collect_service_resource_arns(
+    svc: Dict[str, Any],
+    *,
+    session,
+    region: str,
+    zone: Optional[str] = None,
+) -> List[str]:
+    if not isinstance(svc, dict):
+        return []
+
+    name = normalize_service_name(svc.get("name"))
+    action = (svc.get("action") or "").strip().lower()
+    tags = parse_tags(svc.get("tags"))
+
+    if name == "ec2" and action in ("stop", "reboot", "terminate"):
+        arns = _collect_ec2_instances(session, region, zone, tags)
+        return _apply_count_selection(arns, svc.get("instance_count"))
+
+    if name == "network" and action == "disrupt-connectivity":
+        return _collect_subnets(session, region, zone, tags)
+
+    if name == "rds" and action == "reboot":
+        return _collect_rds_instances(session, region, zone, tags)
+
+    if name == "rds" and action == "failover":
+        return _collect_rds_clusters(session, region, zone, tags)
+
+    if name == "asg" and action == "pause-launch":
+        return _collect_asgs(session, region, zone, tags)
+
+    if name == "ec2" and action == "pause-launch":
+        return _collect_iam_roles_from_service(svc)
+
+    return []
+
+
 def _region_from_arn(arn: str) -> Optional[str]:
     parts = (arn or "").split(":")
     if len(parts) < 4:
@@ -383,30 +419,14 @@ def collect_impacted_resources(
 
         name = normalize_service_name(svc.get("name"))
         action = (svc.get("action") or "").strip().lower()
-        tags = parse_tags(svc.get("tags"))
         selection_mode = _selection_mode_label(svc.get("instance_count"))
         service_label = _service_label(name, action)
-
-        arns: List[str] = []
-
-        if name == "ec2" and action in ("stop", "reboot", "terminate"):
-            arns = _collect_ec2_instances(session, manifest_region, zone, tags)
-            arns = _apply_count_selection(arns, svc.get("instance_count"))
-
-        elif name == "network" and action == "disrupt-connectivity":
-            arns = _collect_subnets(session, manifest_region, zone, tags)
-
-        elif name == "rds" and action == "reboot":
-            arns = _collect_rds_instances(session, manifest_region, zone, tags)
-
-        elif name == "rds" and action == "failover":
-            arns = _collect_rds_clusters(session, manifest_region, zone, tags)
-
-        elif name == "asg" and action == "pause-launch":
-            arns = _collect_asgs(session, manifest_region, zone, tags)
-
-        elif name == "ec2" and action == "pause-launch":
-            arns = _collect_iam_roles_from_service(svc)
+        arns = collect_service_resource_arns(
+            svc,
+            session=session,
+            region=manifest_region,
+            zone=zone,
+        )
 
         for arn in arns:
             out.append(

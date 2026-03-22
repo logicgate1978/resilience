@@ -1,0 +1,12 @@
+actions:
+  - action: ec2:terminate
+    validations:
+      - verify_resource_existence
+  - action: rds:reboot
+    validations:
+      - verify_resource_existence
+      - verify_replica
+  - action: rds:failover
+    validations:
+      - verify_resource_existence
+      - verify_replica
