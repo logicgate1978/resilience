@@ -160,23 +160,106 @@ Responsibilities:
 
 ## Supported Capabilities
 
-| Action | Description | FIS/ARC action | Allowed Values |
-| --- | --- | --- | --- |
-| `ec2:pause-launch` | Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test. | `aws:ec2:api-insufficient-instance-capacity-error` | `pause-launch` |
-| `ec2:stop` | Stop selected EC2 instances and restart them after the configured duration. | `aws:ec2:stop-instances` | `stop` |
-| `ec2:reboot` | Reboot selected EC2 instances. | `aws:ec2:reboot-instances` | `reboot` |
-| `ec2:terminate` | Terminate selected EC2 instances. | `aws:ec2:terminate-instances` | `terminate` |
-| `rds:reboot` | Reboot selected RDS DB instances. | `aws:rds:reboot-db-instances` | `reboot` |
-| `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` | `failover` |
-| `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` | `pause-launch` |
-| `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` | `disrupt-connectivity` |
-| `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` | `delete-pod` |
-| `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` | `failover-global-db` |
-| `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` | `switchover-global-db` |
+| Action | Description | FIS/ARC action |
+| --- | --- | --- |
+| `ec2:pause-launch` | Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test. | `aws:ec2:api-insufficient-instance-capacity-error` |
+| `ec2:stop` | Stop selected EC2 instances and restart them after the configured duration. | `aws:ec2:stop-instances` |
+| `ec2:reboot` | Reboot selected EC2 instances. | `aws:ec2:reboot-instances` |
+| `ec2:terminate` | Terminate selected EC2 instances. | `aws:ec2:terminate-instances` |
+| `rds:reboot` | Reboot selected RDS DB instances. | `aws:rds:reboot-db-instances` |
+| `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` |
+| `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` |
+| `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` |
+| `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` |
+| `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
+| `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
 Current placeholder generator files still exist for `s3` and `efs`, but they are scaffolds only and do not currently define real actions.
 
 ## Manifest Design
+
+### Top-Level Fields
+
+| Field | Required | Applies To | Description |
+| --- | --- | --- | --- |
+| `resilience_test_type` | Yes | All manifests | Selects the execution mode. Current values are `component`, `site`, and `region`. |
+| `region` | Yes for `component` and `site` | Component, Site | AWS Region used for FIS execution, resource discovery, and single-Region observability. |
+| `zone` | Yes for `site` | Site | Availability Zone scope for site-level tests. This is used to narrow supported resources to one AZ. |
+| `primary_region` | Yes for `region` | Region | Current active Region for the workload. Used for Aurora Global Database failover or switchover planning. |
+| `secondary_region` | Yes for `region` | Region | Current standby Region for the workload. Used as the alternate side for regional switching. |
+| `services` | Yes | All manifests | List of service/action blocks that describe what resilience action to run. |
+| `observability` | No | All manifests | Optional configuration for health checks and CloudWatch metric collection around the experiment window. |
+
+### Service Block Fields
+
+Each entry under `services:` is a service/action block.
+
+| Field | Required | Applies To | Description |
+| --- | --- | --- | --- |
+| `name` | Yes | All service blocks | Logical service name such as `ec2`, `rds`, `asg`, `network`, or `eks`. |
+| `action` | Yes | All service blocks | Action to run for that service, for example `terminate`, `reboot`, `failover`, or `delete-pod`. |
+| `tags` | Usually yes | Tag-discovered actions | Comma-separated `key=value` filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags. |
+| `duration` | Depends on action | Actions that require a time window | ISO-8601 duration such as `PT30M`. Used by actions like `ec2:stop`, `ec2:pause-launch`, `asg:pause-launch`, and `network:disrupt-connectivity`. |
+| `instance_count` | Optional | `ec2` instance actions | Narrows selected EC2 instances to the first N deterministic matches. Used for `stop`, `reboot`, and `terminate`. |
+| `iam_roles` | Optional | `ec2:pause-launch` | Comma-separated IAM role names to resolve for the EC2 capacity-error action. |
+| `iam_role_arns` | Optional | `ec2:pause-launch` | Explicit IAM role ARNs to target instead of resolving `iam_roles`. |
+| `target` | Required for structured actions | `eks:delete-pod` | Nested target object for actions that need more than tag-based selection. |
+| `parameters` | Required for structured actions | `eks:delete-pod` | Nested action-parameter object for actions that require extra runtime parameters. |
+| `from` | Yes for Aurora Global Database region actions | `rds:failover-global-db`, `rds:switchover-global-db` | Indicates whether the workload is currently active in the `primary` or `secondary` Region. |
+| `use_arc` | Optional | Region actions | Chooses the execution engine for supported regional actions. `true` uses ARC Region switch; `false` uses a custom non-ARC implementation such as boto3. |
+
+### EKS `target` Fields
+
+For `eks:delete-pod`, the `target:` block describes how pods are selected.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `cluster_identifier` | Yes | EKS cluster name used by the FIS target. |
+| `namespace` | Yes | Kubernetes namespace containing the target pods. |
+| `selector_type` | Yes | Selector type passed to FIS. The current manifest examples use `labelSelector`. |
+| `selector_value` | Yes | Selector expression used to match pods, for example `app=my-service`. |
+| `count` | Optional | Number of matching pods to target. Converted into FIS `COUNT(n)` selection mode. |
+| `selection_mode` | Optional | Explicit FIS selection mode. If set, it overrides `count`. |
+
+### EKS `parameters` Fields
+
+For `eks:delete-pod`, the `parameters:` block supplies action parameters.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `kubernetes_service_account` | Yes | Kubernetes service account name used by the FIS pod action inside the cluster. |
+| `grace_period_seconds` | No | Grace period before pod deletion. |
+| `max_errors_percent` | No | Allowed percentage of errors before FIS fails the action. |
+| `fis_pod_container_image` | No | Optional custom container image for the helper pod used by the FIS action. |
+
+### Observability Fields
+
+The `observability:` block controls collection before, during, and after the experiment.
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `start_before` | No | Number of minutes to collect observability before starting the action. |
+| `stop_after` | No | Number of minutes to continue collecting observability after the action completes. |
+| `health_check` | No | Nested HTTP health-check configuration. |
+| `cloudwatch` | No | Nested CloudWatch metric collection configuration. |
+
+### `observability.health_check` Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `endpoint` | Yes when `health_check` is used | HTTP endpoint to probe periodically. |
+| `http_method` | No | HTTP method to use, typically `get`. |
+| `healthy_status_code` | No | Expected healthy response code, typically `200`. |
+| `interval` | No | Polling interval in seconds. |
+
+### `observability.cloudwatch.load_balancer` Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `type` | Yes when load balancer metrics are used | Load balancer type such as `alb`. |
+| `name` | Optional | Explicit load balancer name. |
+| `tags` | Optional | Tag filters used to discover the load balancer when `name` is not supplied. |
+| `metrics` | Yes when load balancer metrics are used | List of CloudWatch metric names to collect for the resolved load balancer. |
 
 ### Component Example
 
