@@ -8,7 +8,7 @@ services:
   duration: PT2M
   target:
     # Replace this with your real EKS cluster name.
-    cluster_identifier: resilience-eks-20260320152420
+    cluster_identifier: resilience-eks-20260323142504
     namespace: default
     selector_type: labelSelector
     selector_value: app=my-service
@@ -25,7 +25,7 @@ services:
 #   action: cpu-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260320152420
+#     cluster_identifier: resilience-eks-20260323142504
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -41,7 +41,7 @@ services:
 #   action: pod-io-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260320152420
+#     cluster_identifier: resilience-eks-20260323142504
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -58,7 +58,7 @@ services:
 #   action: pod-memory-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260320152420
+#     cluster_identifier: resilience-eks-20260323142504
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -74,7 +74,7 @@ services:
 # - name: eks
 #   action: delete-pod
 #   target:
-#     cluster_identifier: resilience-eks-20260320152420
+#     cluster_identifier: resilience-eks-20260323142504
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
