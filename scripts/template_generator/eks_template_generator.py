@@ -97,10 +97,11 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
 
         action_cfg = self._get_action_cfg(svc)
         params = {
-            "kubernetesServiceAccount": self._require_str(
+            "kubernetesServiceAccount": self._require_service_str(
+                svc,
                 action_cfg,
                 ["kubernetes_service_account", "kubernetesServiceAccount"],
-                "services[].parameters.kubernetes_service_account",
+                "services[].kubernetes_service_account or services[].parameters.kubernetes_service_account",
             )
         }
 
@@ -176,10 +177,16 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
         action_cfg = svc.config.get("parameters")
         if isinstance(action_cfg, dict):
             return action_cfg
-        raise ValueError(f"eks:{svc.action} requires services[].parameters to be an object.")
+        return {}
 
     def _require_str(self, source: Dict[str, Any], keys, field_name: str) -> str:
         value = self._optional_value(source, keys)
+        if value is None or str(value).strip() == "":
+            raise ValueError(f"eks action requires {field_name}.")
+        return str(value).strip()
+
+    def _require_service_str(self, svc: ManifestService, source: Dict[str, Any], keys, field_name: str) -> str:
+        value = self._optional_service_value(svc, source, keys)
         if value is None or str(value).strip() == "":
             raise ValueError(f"eks action requires {field_name}.")
         return str(value).strip()
@@ -188,6 +195,15 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
         for key in keys:
             if key in source and source[key] is not None:
                 return source[key]
+        return None
+
+    def _optional_service_value(self, svc: ManifestService, source: Dict[str, Any], keys) -> Optional[Any]:
+        value = self._optional_value(source, keys)
+        if value is not None:
+            return value
+        for key in keys:
+            if key in svc.config and svc.config[key] is not None:
+                return svc.config[key]
         return None
 
     def _stringify_parameter_value(self, value: Any) -> str:

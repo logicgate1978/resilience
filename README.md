@@ -228,6 +228,13 @@ For `eks:delete-pod`, the `target:` block describes how pods are selected.
 
 For EKS pod actions, the `parameters:` block supplies action parameters.
 
+Important note:
+
+- `parameters:` is optional in the current implementation
+- `kubernetes_service_account` is still required for supported EKS pod actions
+- `kubernetes_service_account` can be provided either at the service-block level or inside `parameters:`
+- if optional fields such as `workers`, `percent`, or `max_errors_percent` are omitted, AWS FIS uses its own default values for that action
+
 | Field | Required | Description |
 | --- | --- | --- |
 | `kubernetes_service_account` | Yes | Kubernetes service account name used by the FIS pod action inside the cluster. |
