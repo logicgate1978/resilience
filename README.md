@@ -505,6 +505,73 @@ The region discovery logic:
 - load balancer CloudWatch collector
 - automatic CloudWatch collector for some impacted ASG and RDS resources
 
+### How Observability Is Configured
+
+`scripts/observability.py` reads the `observability:` block through `parse_observability()`.
+
+Current behavior:
+
+- `start_before` and `stop_after` are interpreted as minutes
+- `health_check.http_method` supports `get` and `post`
+- `health_check.healthy_status_code` can be a single value, a comma-separated string, or a list
+- if `health_check.healthy_status_code` is omitted, the collector defaults to `[200]`
+- if `health_check.interval` is omitted, the collector defaults to `10` seconds
+- load balancer CloudWatch collection is enabled only when `observability.cloudwatch.load_balancer.type` and a non-empty `metrics` list are provided
+
+### Health Check Collection
+
+The health-check collector:
+
+- runs in its own thread
+- writes `health_check.csv`
+- records the columns:
+  - `time`
+  - `http_status_code`
+  - `error`
+- marks a sample healthy in memory when the returned status code is in the configured `healthy_status_code` list
+- treats request exceptions as unhealthy and records the error text
+
+The current CSV output does not include a `healthy` column. The healthy/unhealthy decision is derived later by the report code from the HTTP status code values in `health_check.csv`.
+
+### CloudWatch Collection
+
+There are two CloudWatch collection modes:
+
+1. Load balancer metrics from `observability.cloudwatch.load_balancer`
+2. Automatic impacted-resource metrics for supported ASG and RDS resources
+
+Current behavior:
+
+- one CSV file is written per metric
+- each metric CSV contains:
+  - `time`
+  - `value`
+- the CloudWatch query period is rounded to a minimum of `60` seconds and then to the next multiple of `60`
+- each poll queries a recent sliding window of `max(period * 5, 300)` seconds
+- the collector always uses CloudWatch `Stat = Sum`
+
+### Automatic Impacted-Resource Metrics
+
+Automatic metric collection is derived from `impacted_resources.json` using `SERVICE_CLOUDWATCH_METRICS_MAP`.
+
+Current mappings:
+
+- `asg`
+  - `GroupDesiredCapacity`
+  - `GroupInServiceInstances`
+  - `GroupPendingInstances`
+  - `GroupTerminatingInstances`
+- `rds:db`
+  - `CPUUtilization`
+  - `DatabaseConnections`
+  - `FreeableMemory`
+  - `FreeStorageSpace`
+- `rds:cluster`
+  - `DatabaseConnections`
+  - `VolumeReadIOPs`
+  - `VolumeWriteIOPs`
+  - `AuroraReplicaLagMaximum`
+
 ### Important Note
 
 The auto-collection mapping lives in `SERVICE_CLOUDWATCH_METRICS_MAP`.
@@ -532,6 +599,62 @@ It produces:
 - impacted resource summary
 - grouped charts
 - HTML report
+
+### How the Report Calculates SLO Summary
+
+The report writes an `SLO Summary (Approx.)` block by scanning the generated CSV files in the output directory.
+
+#### Health Check SLO
+
+For `health_check.csv`, the report currently classifies a sample as healthy when:
+
+- `http_status_code` is between `200` and `399` inclusive of `200` and exclusive of `400`
+
+Important nuance:
+
+- this report logic does not currently reuse the manifest’s `healthy_status_code` setting
+- the collector can be configured with a narrower healthy-code list, but the report still treats any `2xx` or `3xx` as healthy
+
+The current health-check SLO fields are:
+
+- `samples`: number of valid health-check rows
+- `healthy_samples`: number of rows classified as healthy
+- `availability`: `healthy_samples / samples`
+- `sample_interval_seconds`: median delta between consecutive samples
+- `total_outage_seconds_approx`: `unhealthy_samples * sample_interval_seconds`
+- `longest_outage_seconds_approx`: longest consecutive unhealthy run in samples multiplied by the sample interval
+- `first_failure_after_experiment_start`: first unhealthy sample at or after experiment start
+- `recovery_seconds_approx`: elapsed seconds from the first unhealthy sample after experiment start to the first subsequent healthy sample
+
+This is intentionally approximate. It is sample-based rather than request-volume-based.
+
+#### Metric Summary
+
+For every non-health-check CSV, the report currently calculates:
+
+- `min`
+- `max`
+- `avg`
+- `points`
+
+If the report can determine `startTime` and `endTime` from `result_*.json`, it also computes:
+
+- `during_experiment.min`
+- `during_experiment.max`
+- `during_experiment.avg`
+- `during_experiment.points`
+
+This is a descriptive summary only. It is not a threshold-based SLO evaluation.
+
+### Experiment Timeline Overlay
+
+Each chart uses the experiment metadata from `result_*.json` to add:
+
+- `Experiment Start`
+- `Experiment End`
+- a shaded experiment window
+
+This makes the charts and the approximate SLO summary relative to the same recorded execution window.
 
 Current grouping behavior:
 
