@@ -1,8 +1,11 @@
 resilience_test_type: component
 region: ap-southeast-1
+# This manifest is designed for EKS pod fault testing.
+# Enable one EKS action block at a time unless you intentionally want parallel faults.
 services:
 - name: eks
-  action: delete-pod
+  action: pod-cpu-stress
+  duration: PT2M
   target:
     # Replace this with your real EKS cluster name.
     cluster_identifier: resilience-eks-20260320152420
@@ -12,8 +15,75 @@ services:
     count: 1
   parameters:
     kubernetes_service_account: myserviceaccount
-    grace_period_seconds: 0
+    workers: 1
+    percent: 80
     max_errors_percent: 0
+    fis_pod_security_policy: baseline
+
+# CPU stress alternative using the shorter manifest action synonym.
+# - name: eks
+#   action: cpu-stress
+#   duration: PT2M
+#   target:
+#     cluster_identifier: resilience-eks-20260320152420
+#     namespace: default
+#     selector_type: labelSelector
+#     selector_value: app=my-service
+#     count: 1
+#   parameters:
+#     kubernetes_service_account: myserviceaccount
+#     workers: 1
+#     percent: 80
+#     max_errors_percent: 0
+#
+# I/O stress example.
+# - name: eks
+#   action: pod-io-stress
+#   duration: PT2M
+#   target:
+#     cluster_identifier: resilience-eks-20260320152420
+#     namespace: default
+#     selector_type: labelSelector
+#     selector_value: app=my-service
+#     count: 1
+#   parameters:
+#     kubernetes_service_account: myserviceaccount
+#     workers: 1
+#     percent: 50
+#     max_errors_percent: 0
+#     fis_pod_security_policy: baseline
+#
+# Memory stress example.
+# - name: eks
+#   action: pod-memory-stress
+#   duration: PT2M
+#   target:
+#     cluster_identifier: resilience-eks-20260320152420
+#     namespace: default
+#     selector_type: labelSelector
+#     selector_value: app=my-service
+#     count: 1
+#   parameters:
+#     kubernetes_service_account: myserviceaccount
+#     workers: 1
+#     percent: 70
+#     max_errors_percent: 0
+#     fis_pod_security_policy: baseline
+#
+# Pod delete example.
+# - name: eks
+#   action: delete-pod
+#   target:
+#     cluster_identifier: resilience-eks-20260320152420
+#     namespace: default
+#     selector_type: labelSelector
+#     selector_value: app=my-service
+#     count: 1
+#   parameters:
+#     kubernetes_service_account: myserviceaccount
+#     grace_period_seconds: 0
+#     max_errors_percent: 0
+#     fis_pod_security_policy: baseline
 observability:
   start_before: 1
   stop_after: 1

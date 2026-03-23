@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Optional
 
 from .base import ManifestService, ServiceTemplateGenerator
@@ -9,9 +10,23 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
     service_name = "eks"
     action_map = {
         "delete-pod": "aws:eks:pod-delete",
+        "pod-delete": "aws:eks:pod-delete",
+        "cpu-stress": "aws:eks:pod-cpu-stress",
+        "pod-cpu-stress": "aws:eks:pod-cpu-stress",
+        "io-stress": "aws:eks:pod-io-stress",
+        "pod-io-stress": "aws:eks:pod-io-stress",
+        "memory-stress": "aws:eks:pod-memory-stress",
+        "pod-memory-stress": "aws:eks:pod-memory-stress",
     }
     target_spec_map = {
         "delete-pod": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "pod-delete": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "cpu-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "pod-cpu-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "io-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "pod-io-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "memory-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
+        "pod-memory-stress": {"resourceType": "aws:eks:pod", "target_key": "Pods"},
     }
 
     def get_selection_mode(
@@ -71,7 +86,13 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
         action_id: str,
     ) -> Dict[str, str]:
         _ = manifest
-        if action_id != "aws:eks:pod-delete":
+        supported_action_ids = {
+            "aws:eks:pod-delete",
+            "aws:eks:pod-cpu-stress",
+            "aws:eks:pod-io-stress",
+            "aws:eks:pod-memory-stress",
+        }
+        if action_id not in supported_action_ids:
             return {}
 
         action_cfg = self._get_action_cfg(svc)
@@ -83,12 +104,30 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
             )
         }
 
-        grace_period_seconds = self._optional_value(
-            action_cfg,
-            ["grace_period_seconds", "gracePeriodSeconds"],
-        )
-        if grace_period_seconds is not None:
-            params["gracePeriodSeconds"] = str(grace_period_seconds)
+        if action_id == "aws:eks:pod-delete":
+            grace_period_seconds = self._optional_value(
+                action_cfg,
+                ["grace_period_seconds", "gracePeriodSeconds"],
+            )
+            if grace_period_seconds is not None:
+                params["gracePeriodSeconds"] = str(grace_period_seconds)
+
+        if action_id in (
+            "aws:eks:pod-cpu-stress",
+            "aws:eks:pod-io-stress",
+            "aws:eks:pod-memory-stress",
+        ):
+            if not svc.duration or not str(svc.duration).strip():
+                raise ValueError(f"eks:{svc.action} requires services[].duration (e.g. PT2M).")
+            params["duration"] = str(svc.duration).strip()
+
+            workers = self._optional_value(action_cfg, ["workers"])
+            if workers is not None:
+                params["workers"] = str(workers)
+
+            percent = self._optional_value(action_cfg, ["percent"])
+            if percent is not None:
+                params["percent"] = str(percent)
 
         fis_pod_container_image = self._optional_value(
             action_cfg,
@@ -104,24 +143,45 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
         if max_errors_percent is not None:
             params["maxErrorsPercent"] = str(max_errors_percent)
 
+        fis_pod_labels = self._optional_value(
+            action_cfg,
+            ["fis_pod_labels", "fisPodLabels"],
+        )
+        if fis_pod_labels is not None:
+            params["fisPodLabels"] = self._stringify_parameter_value(fis_pod_labels)
+
+        fis_pod_annotations = self._optional_value(
+            action_cfg,
+            ["fis_pod_annotations", "fisPodAnnotations"],
+        )
+        if fis_pod_annotations is not None:
+            params["fisPodAnnotations"] = self._stringify_parameter_value(fis_pod_annotations)
+
+        fis_pod_security_policy = self._optional_value(
+            action_cfg,
+            ["fis_pod_security_policy", "fisPodSecurityPolicy"],
+        )
+        if fis_pod_security_policy is not None:
+            params["fisPodSecurityPolicy"] = str(fis_pod_security_policy)
+
         return params
 
     def _get_target_cfg(self, svc: ManifestService) -> Dict[str, Any]:
         target_cfg = svc.config.get("target")
         if isinstance(target_cfg, dict):
             return target_cfg
-        raise ValueError("eks:delete-pod requires services[].target to be an object.")
+        raise ValueError(f"eks:{svc.action} requires services[].target to be an object.")
 
     def _get_action_cfg(self, svc: ManifestService) -> Dict[str, Any]:
         action_cfg = svc.config.get("parameters")
         if isinstance(action_cfg, dict):
             return action_cfg
-        raise ValueError("eks:delete-pod requires services[].parameters to be an object.")
+        raise ValueError(f"eks:{svc.action} requires services[].parameters to be an object.")
 
     def _require_str(self, source: Dict[str, Any], keys, field_name: str) -> str:
         value = self._optional_value(source, keys)
         if value is None or str(value).strip() == "":
-            raise ValueError(f"eks:delete-pod requires {field_name}.")
+            raise ValueError(f"eks action requires {field_name}.")
         return str(value).strip()
 
     def _optional_value(self, source: Dict[str, Any], keys) -> Optional[Any]:
@@ -129,3 +189,8 @@ class EKSTemplateGenerator(ServiceTemplateGenerator):
             if key in source and source[key] is not None:
                 return source[key]
         return None
+
+    def _stringify_parameter_value(self, value: Any) -> str:
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, separators=(",", ":"))
+        return str(value)

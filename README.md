@@ -171,6 +171,9 @@ Responsibilities:
 | `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` |
 | `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` |
 | `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` |
+| `eks:pod-cpu-stress` | Run CPU stress against selected EKS pods. | `aws:eks:pod-cpu-stress` |
+| `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
+| `eks:pod-memory-stress` | Run memory stress against selected EKS pods. | `aws:eks:pod-memory-stress` |
 | `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 | `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
@@ -223,14 +226,19 @@ For `eks:delete-pod`, the `target:` block describes how pods are selected.
 
 ### EKS `parameters` Fields
 
-For `eks:delete-pod`, the `parameters:` block supplies action parameters.
+For EKS pod actions, the `parameters:` block supplies action parameters.
 
 | Field | Required | Description |
 | --- | --- | --- |
 | `kubernetes_service_account` | Yes | Kubernetes service account name used by the FIS pod action inside the cluster. |
 | `grace_period_seconds` | No | Grace period before pod deletion. |
+| `workers` | No | Number of stress workers for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
+| `percent` | No | Stress intensity percentage for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
 | `max_errors_percent` | No | Allowed percentage of errors before FIS fails the action. |
 | `fis_pod_container_image` | No | Optional custom container image for the helper pod used by the FIS action. |
+| `fis_pod_labels` | No | Optional labels applied to the FIS orchestration pod. |
+| `fis_pod_annotations` | No | Optional annotations applied to the FIS orchestration pod. |
+| `fis_pod_security_policy` | No | Optional Kubernetes Security Standards policy for the FIS orchestration pod and ephemeral containers. |
 
 ### Observability Fields
 
