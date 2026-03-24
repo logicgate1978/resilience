@@ -7,6 +7,7 @@ import yaml
 from utility import normalize_service_name
 from validations.base import ValidationContext, ValidationError
 from validations.ec2 import EC2Validator
+from validations.eks import EKSValidator
 from validations.rds import RDSValidator
 
 
@@ -15,6 +16,7 @@ ACTIONS_PATH = os.path.join(SCRIPT_DIR, "actions.yml")
 
 _VALIDATORS = {
     "ec2": EC2Validator(),
+    "eks": EKSValidator(),
     "rds": RDSValidator(),
 }
 

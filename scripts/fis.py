@@ -7,6 +7,13 @@ from typing import Any, Dict, List, Optional
 import boto3
 import botocore
 
+from component_actions import (
+    build_custom_execution_plan,
+    collect_custom_impacted_resources,
+    execute_custom_plan,
+    manifest_has_custom_actions,
+    validate_component_action_mix,
+)
 from fis_template_generator import create_template, generate_template_payload
 from observability import parse_observability, start_observability_collectors
 from region_switch import (
@@ -250,9 +257,113 @@ def main() -> int:
             region=region,
             zone=zone,
         )
+        validate_component_action_mix(manifest)
     except ValidationError as e:
         print(f"[ERROR] {e}")
         return 1
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
+    if manifest_has_custom_actions(manifest):
+        execution_plan = build_custom_execution_plan(
+            manifest,
+            default_timeout_seconds=args.timeout_seconds,
+        )
+        plan_name = execution_plan["name"]
+        report_filename = _get_report_filename(plan_name)
+
+        execution_plan_path = os.path.join(args.outdir, f"custom_execution_plan_{plan_name}.json")
+        with open(execution_plan_path, "w", encoding="utf-8") as f:
+            f.write(pretty(execution_plan))
+        print(f"[OK] Wrote custom execution plan JSON: {execution_plan_path}")
+
+        impacted_resources = collect_custom_impacted_resources(execution_plan)
+        impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
+        with open(impacted_resources_path, "w", encoding="utf-8") as f:
+            f.write(pretty({"impacted_resources": impacted_resources}))
+        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+
+        if args.dry_run:
+            print("[INFO] Dry-run enabled: skipping create/execute.")
+            return 0
+
+        stop_event: Optional[Any] = None
+        obs_results: Optional[Dict[str, Any]] = None
+        obs_threads: List[Any] = []
+        report_path: Optional[str] = None
+
+        try:
+            stop_event, obs_results, obs_threads = start_observability_collectors(
+                manifest=manifest,
+                session=session,
+                region=region,
+                outdir=args.outdir,
+                impacted_resources=impacted_resources,
+            )
+
+            obs_cfg = parse_observability(manifest)
+            start_before_min = int(obs_cfg.get("start_before") or 0)
+            stop_after_min = int(obs_cfg.get("stop_after") or 0)
+
+            if start_before_min > 0:
+                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting custom action...")
+                time.sleep(start_before_min * 60)
+
+            summary = execute_custom_plan(
+                session=session,
+                execution_plan=execution_plan,
+                poll_seconds=args.poll_seconds,
+                timeout_seconds=args.timeout_seconds,
+            )
+
+            if stop_after_min > 0:
+                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+                time.sleep(stop_after_min * 60)
+
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                t.join(timeout=5)
+
+            if obs_results is not None:
+                summary["observability"] = obs_results
+
+            result_path = os.path.join(args.outdir, f"result_{plan_name}.json")
+            with open(result_path, "w", encoding="utf-8") as f:
+                f.write(pretty(summary))
+            print(f"[OK] Wrote result summary JSON: {result_path}")
+
+            print("[RESULT] Summary:")
+            print(pretty(summary))
+
+            report_path = generate_report(args.outdir, html_filename=report_filename)
+            print(f"[OK] Wrote HTML report: {report_path}")
+
+            if args.upload_artifactory and report_path:
+                upload_files_to_artifactory([report_path])
+
+        except botocore.exceptions.ClientError as e:
+            raise RuntimeError(f"AWS API error: {e}") from e
+        finally:
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                try:
+                    t.join(timeout=2)
+                except Exception:
+                    pass
+
+            if report_path is None:
+                try:
+                    rp = generate_report(args.outdir, html_filename=report_filename)
+                    print(f"[OK] Wrote HTML report: {rp}")
+                    if args.upload_artifactory:
+                        upload_files_to_artifactory([rp])
+                except Exception:
+                    pass
+
+        return 0
 
     if args.dry_run:
         fis_role_arn = args.fis_role_arn or "REPLACE_ME"

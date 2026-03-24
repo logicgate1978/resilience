@@ -2,10 +2,11 @@
 
 This repository contains a manifest-driven resilience testing framework for AWS workloads.
 
-It currently supports two execution models:
+It currently supports three execution models:
 
 1. AWS Fault Injection Service (FIS) for component and site resilience tests
 2. AWS ARC Region switch for regional Aurora Global Database failover and switchover tests
+3. Custom component actions for component/site behaviors that are not available as native FIS actions
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 
@@ -24,6 +25,7 @@ The current architecture deliberately separates:
 
 - FIS-based infrastructure chaos actions
 - ARC-based regional switch actions
+- custom component actions
 - observability and reporting
 - resource discovery
 
@@ -39,14 +41,14 @@ Manifest:
 Execution path:
 
 1. `scripts/fis.py` loads the manifest
-2. `scripts/fis_template_generator.py` delegates to `scripts/template_generator/`
-3. A FIS experiment template payload is generated
-4. `scripts/resource.py` discovers impacted resources
-5. `scripts/observability.py` starts collectors
-6. FIS template is created and the experiment is started
-7. The experiment is polled until completion
-8. Results are written to disk
-9. `scripts/chart.py` generates an HTML report
+2. The action is routed to either:
+   - `scripts/template_generator/` for native FIS actions
+   - `scripts/component_actions/` for custom-only component actions
+3. Impacted resources are written
+4. `scripts/observability.py` starts collectors
+5. The selected execution engine runs
+6. Results are written to disk
+7. `scripts/chart.py` generates an HTML report
 
 ### Region Tests
 
@@ -80,11 +82,26 @@ Important design point:
 Responsibilities:
 
 - loads the manifest
-- decides whether the run is FIS-based or ARC-based
+- decides whether the run is FIS-based, ARC-based, or custom-component based
 - writes payload and result artifacts
 - starts observability
 - executes and polls the selected control plane
 - triggers HTML report generation
+
+### Custom Component Actions
+
+- `scripts/component_actions/__init__.py`
+- `scripts/component_actions/base.py`
+- `scripts/component_actions/registry.py`
+- `scripts/component_actions/eks.py`
+- `scripts/component_actions/k8s_auth.py`
+
+Responsibilities:
+
+- define non-FIS component actions
+- build custom execution plans
+- execute custom actions and return report-compatible summaries
+- connect to the Kubernetes API for EKS custom actions
 
 ### FIS Template Generation
 
@@ -175,6 +192,7 @@ Responsibilities:
 | `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
 | `eks:pod-memory-stress` | Run memory stress against selected EKS pods. | `aws:eks:pod-memory-stress` |
 | `eks:terminate-nodegroup-instances` | Terminate a percentage of instances in an Amazon EKS managed node group. | `aws:eks:terminate-nodegroup-instances` |
+| `eks:scale-deployment` | Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API. |  |
 | `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 | `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
@@ -207,14 +225,14 @@ Each entry under `services:` is a service/action block.
 | `instance_count` | Optional | `ec2` instance actions | Narrows selected EC2 instances to the first N deterministic matches. Used for `stop`, `reboot`, and `terminate`. |
 | `iam_roles` | Optional | `ec2:pause-launch` | Comma-separated IAM role names to resolve for the EC2 capacity-error action. |
 | `iam_role_arns` | Optional | `ec2:pause-launch` | Explicit IAM role ARNs to target instead of resolving `iam_roles`. |
-| `target` | Required for structured actions | `eks:delete-pod` | Nested target object for actions that need more than tag-based selection. |
-| `parameters` | Required for structured actions | `eks:delete-pod` | Nested action-parameter object for actions that require extra runtime parameters. |
+| `target` | Required for structured actions | `eks` structured actions, custom actions | Nested target object for actions that need more than tag-based selection. |
+| `parameters` | Required for many structured actions | `eks` structured actions, custom actions | Nested action-parameter object for actions that require extra runtime parameters. |
 | `from` | Yes for Aurora Global Database region actions | `rds:failover-global-db`, `rds:switchover-global-db` | Indicates whether the workload is currently active in the `primary` or `secondary` Region. |
 | `use_arc` | Optional | Region actions | Chooses the execution engine for supported regional actions. `true` uses ARC Region switch; `false` uses a custom non-ARC implementation such as boto3. |
 
 ### EKS `target` Fields
 
-For EKS pod actions, the `target:` block describes how pods are selected. For `eks:terminate-nodegroup-instances`, the target can instead supply explicit managed node group ARNs.
+For EKS pod actions, the `target:` block describes how pods are selected. For `eks:terminate-nodegroup-instances`, the target can instead supply explicit managed node group ARNs. For `eks:scale-deployment`, the target identifies the Kubernetes Deployment.
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -226,6 +244,7 @@ For EKS pod actions, the `target:` block describes how pods are selected. For `e
 | `selection_mode` | Optional | Explicit FIS selection mode. If set, it overrides `count`. |
 | `nodegroup_arn` | Optional | Explicit managed node group ARN for `eks:terminate-nodegroup-instances`. |
 | `nodegroup_arns` | Optional | Explicit list of managed node group ARNs for `eks:terminate-nodegroup-instances`. |
+| `deployment_name` | Yes for `eks:scale-deployment` | Kubernetes Deployment name to scale. |
 
 ### EKS `parameters` Fields
 
@@ -246,6 +265,9 @@ Important note:
 | `percent` | No | Stress intensity percentage for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
 | `max_errors_percent` | No | Allowed percentage of errors before FIS fails the action. |
 | `instance_termination_percentage` | Yes for `terminate-nodegroup-instances` | Percentage of managed node group instances to terminate. |
+| `replicas` | Yes for `eks:scale-deployment` | Desired absolute replica count for the target Deployment. |
+| `wait_for_ready` | No | Whether the custom scaler waits until the Deployment is reconciled and ready. Default is `true`. |
+| `timeout_seconds` | No | Per-action timeout for custom Deployment scaling readiness. |
 | `fis_pod_container_image` | No | Optional custom container image for the helper pod used by the FIS action. |
 | `fis_pod_labels` | No | Optional labels applied to the FIS orchestration pod. |
 | `fis_pod_annotations` | No | Optional annotations applied to the FIS orchestration pod. |
@@ -484,6 +506,50 @@ Because the registry dynamically imports `*_template_generator.py` files, new se
 - `parameters`
 
 This pattern is useful for future service actions that require structured target or action parameters rather than plain tags.
+
+## Custom Component Action Design
+
+Custom component actions are used when the framework needs to execute a component/site action that is not available as a native FIS action.
+
+Current implementation:
+
+- `eks:scale-deployment`
+
+Design rules:
+
+1. Native FIS actions stay in `scripts/template_generator/`.
+2. Custom-only component actions live under `scripts/component_actions/`.
+3. `scripts/fis.py` routes a component/site manifest to either:
+   - the FIS template path
+   - the custom component-action path
+4. Mixing native FIS actions and custom component actions in the same manifest is intentionally not supported yet.
+
+### Current `eks:scale-deployment` Behavior
+
+The custom scaler:
+
+1. reads the EKS cluster endpoint and CA from `DescribeCluster`
+2. generates an IAM-authenticated EKS bearer token
+3. patches the target Deployment replica count through the Kubernetes API
+4. optionally waits until the Deployment is reconciled and ready
+
+Readiness is considered complete when:
+
+- `status.observedGeneration >= metadata.generation`
+- `spec.replicas == desired replicas`
+- if desired replicas is greater than `0`:
+  - `status.replicas == desired replicas`
+  - `status.updatedReplicas == desired replicas`
+  - `status.readyReplicas == desired replicas`
+  - `status.availableReplicas == desired replicas`
+- if desired replicas is `0`:
+  - `status.replicas == 0`
+  - `status.readyReplicas == 0`
+  - `status.availableReplicas == 0`
+
+The impacted resource written for this action is a synthetic identifier in this form:
+
+- `eks://<cluster>/<namespace>/deployment/<deployment>`
 
 ## Resource Discovery Design
 

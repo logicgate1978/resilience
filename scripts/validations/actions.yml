@@ -10,3 +10,7 @@ actions:
     validations:
       - verify_resource_existence
       - verify_replica
+  - action: eks:scale-deployment
+    validations:
+      - verify_deployment_existence
+      - verify_replicas_value

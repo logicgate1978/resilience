@@ -5,11 +5,17 @@ region: ap-southeast-1
 
 services:
 - name: eks
-  action: terminate-nodegroup-instances
-  tags: environment=development,project=clouddash
+  action: scale-deployment
+  target:
+    cluster_identifier: resilience-eks-20260323142504
+    namespace: default
+    deployment_name: my-service
   parameters:
-    instance_termination_percentage: 100
+    replicas: 0
+    wait_for_ready: true
+    timeout_seconds: 600
 
+# CPU stress example.
 # - name: eks
 #   action: pod-cpu-stress
 #   duration: PT2M
@@ -108,6 +114,18 @@ services:
 #       - arn:aws:eks:ap-southeast-1:123456789012:nodegroup/resilience-eks-20260323142504/default-ng/abcd1234-5678-90ab-cdef-111122223333
 #   parameters:
 #     instance_termination_percentage: 50
+#
+# Scale deployment custom action example.
+# - name: eks
+#   action: scale-deployment
+#   target:
+#     cluster_identifier: resilience-eks-20260323142504
+#     namespace: default
+#     deployment_name: my-service
+#   parameters:
+#     replicas: 2
+#     wait_for_ready: true
+#     timeout_seconds: 600
 observability:
   start_before: 1
   stop_after: 1
