@@ -2,23 +2,30 @@ resilience_test_type: component
 region: ap-southeast-1
 # This manifest is designed for EKS pod fault testing.
 # Enable one EKS action block at a time unless you intentionally want parallel faults.
+
 services:
 - name: eks
-  action: pod-cpu-stress
-  duration: PT2M
-  target:
-    # Replace this with your real EKS cluster name.
-    cluster_identifier: resilience-eks-20260323142504
-    namespace: default
-    selector_type: labelSelector
-    selector_value: app=my-service
-    count: 1
+  action: terminate-nodegroup-instances
+  tags: environment=development,project=clouddash
   parameters:
-    kubernetes_service_account: myserviceaccount
-    workers: 1
-    percent: 80
-    max_errors_percent: 0
-    fis_pod_security_policy: baseline
+    instance_termination_percentage: 50
+
+# - name: eks
+#   action: pod-cpu-stress
+#   duration: PT2M
+#   target:
+#     # Replace this with your real EKS cluster name.
+#     cluster_identifier: resilience-eks-20260323142504
+#     namespace: default
+#     selector_type: labelSelector
+#     selector_value: app=my-service
+#     count: 1
+#   parameters:
+#     kubernetes_service_account: myserviceaccount
+#     workers: 1
+#     percent: 80
+#     max_errors_percent: 0
+#     fis_pod_security_policy: baseline
 
 # CPU stress alternative using the shorter manifest action synonym.
 # - name: eks
@@ -35,7 +42,7 @@ services:
 #     workers: 1
 #     percent: 80
 #     max_errors_percent: 0
-#
+
 # I/O stress example.
 # - name: eks
 #   action: pod-io-stress
@@ -52,7 +59,7 @@ services:
 #     percent: 50
 #     max_errors_percent: 0
 #     fis_pod_security_policy: baseline
-#
+
 # Memory stress example.
 # - name: eks
 #   action: pod-memory-stress
@@ -69,7 +76,7 @@ services:
 #     percent: 70
 #     max_errors_percent: 0
 #     fis_pod_security_policy: baseline
-#
+
 # Pod delete example.
 # - name: eks
 #   action: delete-pod
@@ -84,6 +91,23 @@ services:
 #     grace_period_seconds: 0
 #     max_errors_percent: 0
 #     fis_pod_security_policy: baseline
+
+# Terminate managed node group instances example.
+# Use either tags on the service block or explicit nodegroup ARN(s) under target.
+# - name: eks
+#   action: terminate-nodegroup-instances
+#   tags: environment=development,project=clouddash
+#   parameters:
+#     instance_termination_percentage: 50
+#
+# Explicit managed node group ARN example.
+# - name: eks
+#   action: terminate-nodegroup-instances
+#   target:
+#     nodegroup_arns:
+#       - arn:aws:eks:ap-southeast-1:123456789012:nodegroup/resilience-eks-20260323142504/default-ng/abcd1234-5678-90ab-cdef-111122223333
+#   parameters:
+#     instance_termination_percentage: 50
 observability:
   start_before: 1
   stop_after: 1

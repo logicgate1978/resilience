@@ -174,6 +174,7 @@ Responsibilities:
 | `eks:pod-cpu-stress` | Run CPU stress against selected EKS pods. | `aws:eks:pod-cpu-stress` |
 | `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
 | `eks:pod-memory-stress` | Run memory stress against selected EKS pods. | `aws:eks:pod-memory-stress` |
+| `eks:terminate-nodegroup-instances` | Terminate a percentage of instances in an Amazon EKS managed node group. | `aws:eks:terminate-nodegroup-instances` |
 | `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 | `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
@@ -213,16 +214,18 @@ Each entry under `services:` is a service/action block.
 
 ### EKS `target` Fields
 
-For `eks:delete-pod`, the `target:` block describes how pods are selected.
+For EKS pod actions, the `target:` block describes how pods are selected. For `eks:terminate-nodegroup-instances`, the target can instead supply explicit managed node group ARNs.
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `cluster_identifier` | Yes | EKS cluster name used by the FIS target. |
-| `namespace` | Yes | Kubernetes namespace containing the target pods. |
-| `selector_type` | Yes | Selector type passed to FIS. The current manifest examples use `labelSelector`. |
-| `selector_value` | Yes | Selector expression used to match pods, for example `app=my-service`. |
-| `count` | Optional | Number of matching pods to target. Converted into FIS `COUNT(n)` selection mode. |
+| `cluster_identifier` | Yes for pod-targeted EKS actions | EKS cluster name used by the FIS pod target. |
+| `namespace` | Yes for pod-targeted EKS actions | Kubernetes namespace containing the target pods. |
+| `selector_type` | Yes for pod-targeted EKS actions | Selector type passed to FIS. The current manifest examples use `labelSelector`. |
+| `selector_value` | Yes for pod-targeted EKS actions | Selector expression used to match pods, for example `app=my-service`. |
+| `count` | Optional | Number of matching resources to target. Converted into FIS `COUNT(n)` selection mode. |
 | `selection_mode` | Optional | Explicit FIS selection mode. If set, it overrides `count`. |
+| `nodegroup_arn` | Optional | Explicit managed node group ARN for `eks:terminate-nodegroup-instances`. |
+| `nodegroup_arns` | Optional | Explicit list of managed node group ARNs for `eks:terminate-nodegroup-instances`. |
 
 ### EKS `parameters` Fields
 
@@ -242,6 +245,7 @@ Important note:
 | `workers` | No | Number of stress workers for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
 | `percent` | No | Stress intensity percentage for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
 | `max_errors_percent` | No | Allowed percentage of errors before FIS fails the action. |
+| `instance_termination_percentage` | Yes for `terminate-nodegroup-instances` | Percentage of managed node group instances to terminate. |
 | `fis_pod_container_image` | No | Optional custom container image for the helper pod used by the FIS action. |
 | `fis_pod_labels` | No | Optional labels applied to the FIS orchestration pod. |
 | `fis_pod_annotations` | No | Optional annotations applied to the FIS orchestration pod. |
