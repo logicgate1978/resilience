@@ -7,7 +7,7 @@ services:
 - name: eks
   action: scale-deployment
   target:
-    cluster_identifier: resilience-eks-20260323142504
+    cluster_identifier: resilience-eks-20260324150733
     namespace: default
     deployment_name: my-service
   parameters:
@@ -21,7 +21,7 @@ services:
 #   duration: PT2M
 #   target:
 #     # Replace this with your real EKS cluster name.
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -38,7 +38,7 @@ services:
 #   action: cpu-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -54,7 +54,7 @@ services:
 #   action: pod-io-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -71,7 +71,7 @@ services:
 #   action: pod-memory-stress
 #   duration: PT2M
 #   target:
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -87,7 +87,7 @@ services:
 # - name: eks
 #   action: delete-pod
 #   target:
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     selector_type: labelSelector
 #     selector_value: app=my-service
@@ -111,7 +111,7 @@ services:
 #   action: terminate-nodegroup-instances
 #   target:
 #     nodegroup_arns:
-#       - arn:aws:eks:ap-southeast-1:123456789012:nodegroup/resilience-eks-20260323142504/default-ng/abcd1234-5678-90ab-cdef-111122223333
+#       - arn:aws:eks:ap-southeast-1:123456789012:nodegroup/resilience-eks-20260324150733/default-ng/abcd1234-5678-90ab-cdef-111122223333
 #   parameters:
 #     instance_termination_percentage: 50
 #
@@ -119,13 +119,14 @@ services:
 # - name: eks
 #   action: scale-deployment
 #   target:
-#     cluster_identifier: resilience-eks-20260323142504
+#     cluster_identifier: resilience-eks-20260324150733
 #     namespace: default
 #     deployment_name: my-service
 #   parameters:
 #     replicas: 2
 #     wait_for_ready: true
 #     timeout_seconds: 600
+
 observability:
   start_before: 1
   stop_after: 1
