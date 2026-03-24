@@ -8,7 +8,7 @@ services:
   action: terminate-nodegroup-instances
   tags: environment=development,project=clouddash
   parameters:
-    instance_termination_percentage: 50
+    instance_termination_percentage: 100
 
 # - name: eks
 #   action: pod-cpu-stress
