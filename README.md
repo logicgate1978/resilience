@@ -177,32 +177,40 @@ Responsibilities:
 
 ## Supported Capabilities
 
-| Action | Description | FIS/ARC action |
-| --- | --- | --- |
-| **EC2** |  |  |
-| `ec2:pause-launch` | Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test. | `aws:ec2:api-insufficient-instance-capacity-error` |
-| `ec2:stop` | Stop selected EC2 instances and restart them after the configured duration. | `aws:ec2:stop-instances` |
-| `ec2:reboot` | Reboot selected EC2 instances. | `aws:ec2:reboot-instances` |
-| `ec2:terminate` | Terminate selected EC2 instances. | `aws:ec2:terminate-instances` |
-| **RDS** |  |  |
-| `rds:reboot` | Reboot selected RDS DB instances. | `aws:rds:reboot-db-instances` |
-| `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` |
-| **ASG** |  |  |
-| `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` |
-| **Network** |  |  |
-| `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` |
-| **S3** |  |  |
-| `s3:pause-replication` | Pause replication from source S3 buckets to destination buckets. | `aws:s3:bucket-pause-replication` |
-| **EKS** |  |  |
-| `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` |
-| `eks:pod-cpu-stress` | Run CPU stress against selected EKS pods. | `aws:eks:pod-cpu-stress` |
-| `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
-| `eks:pod-memory-stress` | Run memory stress against selected EKS pods. | `aws:eks:pod-memory-stress` |
-| `eks:terminate-nodegroup-instances` | Terminate a percentage of instances in an Amazon EKS managed node group. | `aws:eks:terminate-nodegroup-instances` |
-| `eks:scale-deployment` | Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API. |  |
-| **Region / RDS Global** |  |  |
-| `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
-| `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Description</th>
+      <th>FIS/ARC action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><th colspan="3">EC2</th></tr>
+    <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
+    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
+    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
+    <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
+    <tr><th colspan="3">RDS</th></tr>
+    <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
+    <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
+    <tr><td><code>rds:failover-global-db</code></td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
+    <tr><td><code>rds:switchover-global-db</code></td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
+    <tr><th colspan="3">ASG</th></tr>
+    <tr><td><code>asg:pause-launch</code></td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td></tr>
+    <tr><th colspan="3">Network</th></tr>
+    <tr><td><code>network:disrupt-connectivity</code></td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
+    <tr><th colspan="3">S3</th></tr>
+    <tr><td><code>s3:pause-replication</code></td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
+    <tr><th colspan="3">EKS</th></tr>
+    <tr><td><code>eks:delete-pod</code></td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td></tr>
+    <tr><td><code>eks:pod-cpu-stress</code></td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td></tr>
+    <tr><td><code>eks:pod-io-stress</code></td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td></tr>
+    <tr><td><code>eks:pod-memory-stress</code></td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td></tr>
+    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API.</td><td></td></tr>
+  </tbody>
+</table>
 
 Current placeholder generator files still exist for `efs`, but they are scaffolds only and do not currently define real actions.
 
