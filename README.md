@@ -850,6 +850,41 @@ Typical install:
 pip install -r scripts/requirements.txt
 ```
 
+## Helper Scripts
+
+The repository also contains helper provisioning scripts under `commands/`.
+
+### EKS Helpers
+
+- `commands/eks/` contains cluster creation, teardown, access-grant, and sample workload scripts for EKS testing.
+
+### EC2 / ASG Helper
+
+- `commands/ec2/create_asg_alb_stack.sh` creates or updates a small web stack for ASG-based resilience testing.
+- `commands/ec2/destroy_asg_alb_stack.sh` tears down that ASG web stack using the saved local state by default.
+
+Current behavior:
+
+- uses `t3.micro`
+- resolves the latest Amazon Linux 2023 AMI from the public SSM parameter
+- installs and starts `nginx` with EC2 user data
+- creates an internet-facing ALB on port `80`
+- creates an EC2 security group that only allows port `80` from the ALB security group
+- tags launched instances with:
+  - `environment=development`
+  - `project=clouddash`
+- defaults to the Region's default VPC and its default subnets unless overrides are supplied
+- writes stack state to `commands/ec2/.state/current_asg_stack.txt`
+- writes the current ALB DNS name to `commands/ec2/.state/current_asg_alb_dns.txt`
+
+Example:
+
+```bash
+./commands/ec2/create_asg_alb_stack.sh
+./commands/ec2/create_asg_alb_stack.sh --region ap-southeast-1 --max 2 --desired 2
+./commands/ec2/destroy_asg_alb_stack.sh
+```
+
 ### Run a Component or Site Test
 
 From `scripts/`:
