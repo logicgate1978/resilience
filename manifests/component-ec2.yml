@@ -1,0 +1,26 @@
+resilience_test_type: component
+region: ap-southeast-1
+services:
+- name: ec2
+  action: terminate
+  tags: environment=development,project=clouddash
+  instance_count: 1
+- name: rds
+  action: reboot
+  tags: environment=development,project=clouddash
+
+observability:
+  start_before: 2
+  stop_after: 2
+  health_check:
+    endpoint: http://resilience-test-lb-1981158977.ap-southeast-1.elb.amazonaws.com
+    http_method: get
+    healthy_status_code: 200
+    interval: 10
+  cloudwatch:
+    load_balancer:
+      type: alb
+      tags: environment=development,project=clouddash
+      metrics:
+        - HTTPCode_ELB_4XX_Count
+        - HTTPCode_ELB_5XX_Count

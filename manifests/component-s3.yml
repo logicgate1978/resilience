@@ -1,0 +1,12 @@
+resilience_test_type: component
+region: ap-southeast-1
+services:
+- name: s3
+  action: pause-replication
+  tags: environment=development,project=clouddash
+  duration: PT5M
+  destination_region: ap-southeast-2
+  # destination_buckets:
+  #   - my-replication-destination-bucket
+  # prefixes:
+  #   - critical/
