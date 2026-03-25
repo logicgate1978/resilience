@@ -179,21 +179,28 @@ Responsibilities:
 
 | Action | Description | FIS/ARC action |
 | --- | --- | --- |
+| **EC2** |  |  |
 | `ec2:pause-launch` | Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test. | `aws:ec2:api-insufficient-instance-capacity-error` |
 | `ec2:stop` | Stop selected EC2 instances and restart them after the configured duration. | `aws:ec2:stop-instances` |
 | `ec2:reboot` | Reboot selected EC2 instances. | `aws:ec2:reboot-instances` |
 | `ec2:terminate` | Terminate selected EC2 instances. | `aws:ec2:terminate-instances` |
+| **RDS** |  |  |
 | `rds:reboot` | Reboot selected RDS DB instances. | `aws:rds:reboot-db-instances` |
 | `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` |
+| **ASG** |  |  |
 | `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` |
+| **Network** |  |  |
 | `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` |
+| **S3** |  |  |
 | `s3:pause-replication` | Pause replication from source S3 buckets to destination buckets. | `aws:s3:bucket-pause-replication` |
+| **EKS** |  |  |
 | `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` |
 | `eks:pod-cpu-stress` | Run CPU stress against selected EKS pods. | `aws:eks:pod-cpu-stress` |
 | `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
 | `eks:pod-memory-stress` | Run memory stress against selected EKS pods. | `aws:eks:pod-memory-stress` |
 | `eks:terminate-nodegroup-instances` | Terminate a percentage of instances in an Amazon EKS managed node group. | `aws:eks:terminate-nodegroup-instances` |
 | `eks:scale-deployment` | Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API. |  |
+| **Region / RDS Global** |  |  |
 | `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 | `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
