@@ -23,6 +23,8 @@ class CustomComponentAction(ABC):
         *,
         manifest: Dict[str, Any],
         svc: Dict[str, Any],
+        session,
+        region: str,
         index: int,
         default_timeout_seconds: int,
     ) -> Dict[str, Any]:

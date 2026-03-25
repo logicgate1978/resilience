@@ -70,6 +70,8 @@ def validate_component_action_mix(manifest: Dict[str, Any]) -> None:
 def build_custom_execution_plan(
     manifest: Dict[str, Any],
     *,
+    session,
+    region: str,
     default_timeout_seconds: int,
 ) -> Dict[str, Any]:
     validate_component_action_mix(manifest)
@@ -78,7 +80,6 @@ def build_custom_execution_plan(
         raise ValueError("No custom component actions were found in the manifest.")
 
     rtype = (manifest.get("resilience_test_type") or "").strip().lower()
-    region = manifest.get("region")
     plan_name = f"resilience-{rtype}-{utc_ts()}"
     items: List[Dict[str, Any]] = []
 
@@ -92,6 +93,8 @@ def build_custom_execution_plan(
         item = handler.build_plan_item(
             manifest=manifest,
             svc=svc,
+            session=session,
+            region=region,
             index=index,
             default_timeout_seconds=default_timeout_seconds,
         )
@@ -108,6 +111,18 @@ def build_custom_execution_plan(
 def collect_custom_impacted_resources(execution_plan: Dict[str, Any]) -> List[Dict[str, str]]:
     out: List[Dict[str, str]] = []
     for item in execution_plan.get("items") or []:
+        impacted_many = item.get("impacted_resources")
+        if isinstance(impacted_many, list):
+            for impacted in impacted_many:
+                if not isinstance(impacted, dict):
+                    continue
+                out.append(
+                    {
+                        "service": str(impacted.get("service") or ""),
+                        "arn": str(impacted.get("arn") or ""),
+                        "selection_mode": str(impacted.get("selection_mode") or "CUSTOM"),
+                    }
+                )
         impacted = item.get("impacted_resource")
         if isinstance(impacted, dict):
             out.append(

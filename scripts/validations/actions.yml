@@ -1,4 +1,8 @@
 actions:
+  - action: asg:scale
+    validations:
+      - verify_resource_existence
+      - verify_scale_values
   - action: ec2:terminate
     validations:
       - verify_resource_existence

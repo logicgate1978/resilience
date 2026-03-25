@@ -268,6 +268,8 @@ def main() -> int:
     if manifest_has_custom_actions(manifest):
         execution_plan = build_custom_execution_plan(
             manifest,
+            session=session,
+            region=region,
             default_timeout_seconds=args.timeout_seconds,
         )
         plan_name = execution_plan["name"]

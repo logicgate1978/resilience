@@ -271,7 +271,7 @@ def collect_service_resource_arns(
     if name == "rds" and action == "failover":
         return _collect_rds_clusters(session, region, zone, tags)
 
-    if name == "asg" and action == "pause-launch":
+    if name == "asg" and action in ("pause-launch", "scale"):
         return _collect_asgs(session, region, zone, tags)
 
     if name == "ec2" and action == "pause-launch":

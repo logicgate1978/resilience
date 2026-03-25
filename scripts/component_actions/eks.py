@@ -106,10 +106,14 @@ class EKSScaleDeploymentAction(CustomComponentAction):
         *,
         manifest: Dict[str, Any],
         svc: Dict[str, Any],
+        session,
+        region: str,
         index: int,
         default_timeout_seconds: int,
     ) -> Dict[str, Any]:
         _ = manifest
+        _ = session
+        _ = region
         target = _get_target_cfg(svc)
         params = _get_parameters_cfg(svc)
 

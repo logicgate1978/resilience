@@ -198,6 +198,7 @@ Responsibilities:
     <tr><td><code>rds:switchover-global-db</code></td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
     <tr><th colspan="3">ASG</th></tr>
     <tr><td><code>asg:pause-launch</code></td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td></tr>
+    <tr><td><code>asg:scale</code></td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td></tr>
     <tr><th colspan="3">Network</th></tr>
     <tr><td><code>network:disrupt-connectivity</code></td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
     <tr><th colspan="3">S3</th></tr>
@@ -241,6 +242,11 @@ Each entry under `services:` is a service/action block.
 | `instance_count` | Optional | `ec2` instance actions | Narrows selected EC2 instances to the first N deterministic matches. Used for `stop`, `reboot`, and `terminate`. |
 | `iam_roles` | Optional | `ec2:pause-launch` | Comma-separated IAM role names to resolve for the EC2 capacity-error action. |
 | `iam_role_arns` | Optional | `ec2:pause-launch` | Explicit IAM role ARNs to target instead of resolving `iam_roles`. |
+| `parameters.max` | Yes for `asg:scale` | `asg:scale` | Target maximum capacity for the Auto Scaling Group. |
+| `parameters.min` | Optional | `asg:scale` | Target minimum capacity. Defaults to `0` when omitted. |
+| `parameters.desired` | Optional | `asg:scale` | Target desired capacity. Defaults to the configured `max` when omitted. |
+| `parameters.wait_for_ready` | Optional | `asg:scale`, `eks:scale-deployment` | Whether the custom scaler waits until the target reaches the requested steady state. |
+| `parameters.timeout_seconds` | Optional | `asg:scale`, `eks:scale-deployment` | Per-action timeout for custom readiness polling. |
 | `destination_region` | Yes for `s3:pause-replication` | `s3:pause-replication` | Region where the destination replication buckets are located. |
 | `destination_buckets` | Optional | `s3:pause-replication` | Optional list of destination S3 bucket names to narrow which replication destinations are paused. |
 | `prefixes` | Optional | `s3:pause-replication` | Optional list of S3 object key prefixes to narrow replication rules that are paused. |
@@ -532,6 +538,7 @@ Custom component actions are used when the framework needs to execute a componen
 
 Current implementation:
 
+- `asg:scale`
 - `eks:scale-deployment`
 
 Design rules:
@@ -542,6 +549,25 @@ Design rules:
    - the FIS template path
    - the custom component-action path
 4. Mixing native FIS actions and custom component actions in the same manifest is intentionally not supported yet.
+
+### Current `asg:scale` Behavior
+
+The custom ASG scaler:
+
+1. resolves matching Auto Scaling Groups from the manifest tags
+2. updates each matched group with:
+   - `MinSize`
+   - `MaxSize`
+   - `DesiredCapacity`
+3. optionally waits until each group reports the requested min, max, and desired values and the active/in-service instance count reaches the target desired capacity
+
+Default behavior:
+
+- `max` is required
+- `min` defaults to `0`
+- `desired` defaults to `max`
+
+The impacted resources written for this action are the resolved Auto Scaling Group ARNs.
 
 ### Current `eks:scale-deployment` Behavior
 

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from utility import normalize_service_name
+from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
 from validations.ec2 import EC2Validator
 from validations.eks import EKSValidator
@@ -16,6 +17,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ACTIONS_PATH = os.path.join(SCRIPT_DIR, "actions.yml")
 
 _VALIDATORS = {
+    "asg": ASGValidator(),
     "ec2": EC2Validator(),
     "eks": EKSValidator(),
     "rds": RDSValidator(),
