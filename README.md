@@ -187,6 +187,7 @@ Responsibilities:
 | `rds:failover` | Fail over a selected RDS or Aurora DB cluster to a replica. | `aws:rds:failover-db-cluster` |
 | `asg:pause-launch` | Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test. | `aws:ec2:asg-insufficient-instance-capacity-error` |
 | `network:disrupt-connectivity` | Disrupt connectivity for selected subnets. | `aws:network:disrupt-connectivity` |
+| `s3:pause-replication` | Pause replication from source S3 buckets to destination buckets. | `aws:s3:bucket-pause-replication` |
 | `eks:delete-pod` | Delete selected EKS pods by namespace and selector. | `aws:eks:pod-delete` |
 | `eks:pod-cpu-stress` | Run CPU stress against selected EKS pods. | `aws:eks:pod-cpu-stress` |
 | `eks:pod-io-stress` | Run I/O stress against selected EKS pods. | `aws:eks:pod-io-stress` |
@@ -196,7 +197,7 @@ Responsibilities:
 | `rds:failover-global-db` | Fail over an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 | `rds:switchover-global-db` | Switchover an Aurora Global Database across Regions. Uses ARC when `use_arc: true`; otherwise uses a custom boto3 RDS implementation. | `AuroraGlobalDatabase` |
 
-Current placeholder generator files still exist for `s3` and `efs`, but they are scaffolds only and do not currently define real actions.
+Current placeholder generator files still exist for `efs`, but they are scaffolds only and do not currently define real actions.
 
 ## Manifest Design
 
@@ -225,6 +226,9 @@ Each entry under `services:` is a service/action block.
 | `instance_count` | Optional | `ec2` instance actions | Narrows selected EC2 instances to the first N deterministic matches. Used for `stop`, `reboot`, and `terminate`. |
 | `iam_roles` | Optional | `ec2:pause-launch` | Comma-separated IAM role names to resolve for the EC2 capacity-error action. |
 | `iam_role_arns` | Optional | `ec2:pause-launch` | Explicit IAM role ARNs to target instead of resolving `iam_roles`. |
+| `destination_region` | Yes for `s3:pause-replication` | `s3:pause-replication` | Region where the destination replication buckets are located. |
+| `destination_buckets` | Optional | `s3:pause-replication` | Optional list of destination S3 bucket names to narrow which replication destinations are paused. |
+| `prefixes` | Optional | `s3:pause-replication` | Optional list of S3 object key prefixes to narrow replication rules that are paused. |
 | `target` | Required for structured actions | `eks` structured actions, custom actions | Nested target object for actions that need more than tag-based selection. |
 | `parameters` | Required for many structured actions | `eks` structured actions, custom actions | Nested action-parameter object for actions that require extra runtime parameters. |
 | `from` | Yes for Aurora Global Database region actions | `rds:failover-global-db`, `rds:switchover-global-db` | Indicates whether the workload is currently active in the `primary` or `secondary` Region. |

@@ -203,6 +203,47 @@ def _collect_iam_roles_from_service(svc: Dict[str, Any]) -> List[str]:
     return resolve_iam_role_arns_from_names("BAU,Admin,scb-user-instance-role")
 
 
+def _bucket_region_matches(actual_region: Optional[str], desired_region: Optional[str]) -> bool:
+    if not desired_region:
+        return True
+    normalized = actual_region or "us-east-1"
+    return normalized == desired_region
+
+
+def _collect_s3_buckets(session, region: str, tags: Dict[str, str]) -> List[str]:
+    s3 = session.client("s3", region_name=region)
+    arns: List[str] = []
+
+    resp = s3.list_buckets()
+    for bucket in resp.get("Buckets", []):
+        bucket_name = bucket.get("Name")
+        if not bucket_name:
+            continue
+
+        try:
+            loc = s3.get_bucket_location(Bucket=bucket_name)
+            bucket_region = loc.get("LocationConstraint") or "us-east-1"
+        except Exception:
+            continue
+
+        if not _bucket_region_matches(bucket_region, region):
+            continue
+
+        actual_tags: Dict[str, str] = {}
+        if tags:
+            try:
+                tag_resp = s3.get_bucket_tagging(Bucket=bucket_name)
+                actual_tags = {t["Key"]: t.get("Value", "") for t in tag_resp.get("TagSet", []) if "Key" in t}
+            except Exception:
+                continue
+            if not _tags_match(tags, actual_tags):
+                continue
+
+        arns.append(f"arn:aws:s3:::{bucket_name}")
+
+    return arns
+
+
 def collect_service_resource_arns(
     svc: Dict[str, Any],
     *,
@@ -235,6 +276,9 @@ def collect_service_resource_arns(
 
     if name == "ec2" and action == "pause-launch":
         return _collect_iam_roles_from_service(svc)
+
+    if name == "s3" and action in ("pause-replication", "pause-relication"):
+        return _collect_s3_buckets(session, region, tags)
 
     return []
 

@@ -151,7 +151,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: ${SERVICE_ACCOUNT}-fis-role
+  name: ${SERVICE_ACCOUNT}-role
   namespace: ${NAMESPACE}
 rules:
   - apiGroups: [""]
@@ -173,7 +173,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: ${SERVICE_ACCOUNT}-fis-binding
+  name: ${SERVICE_ACCOUNT}-role-binding
   namespace: ${NAMESPACE}
 subjects:
   - kind: ServiceAccount
@@ -184,7 +184,7 @@ subjects:
     name: fis-experiment
 roleRef:
   kind: Role
-  name: ${SERVICE_ACCOUNT}-fis-role
+  name: ${SERVICE_ACCOUNT}-role
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
@@ -234,8 +234,8 @@ spec:
 EOF
 
 verify_resource serviceaccount "${SERVICE_ACCOUNT}"
-verify_resource role "${SERVICE_ACCOUNT}-fis-role"
-verify_resource rolebinding "${SERVICE_ACCOUNT}-fis-binding"
+verify_resource role "${SERVICE_ACCOUNT}-role"
+verify_resource rolebinding "${SERVICE_ACCOUNT}-role-binding"
 
 kubectl rollout status deployment/"${APP_NAME}" -n "${NAMESPACE}" --timeout=300s
 
@@ -256,5 +256,5 @@ echo "  target.selector_value: app=${APP_NAME}"
 echo "  parameters.kubernetes_service_account: ${SERVICE_ACCOUNT}"
 echo
 echo "The script also created:"
-echo "  Role: ${SERVICE_ACCOUNT}-fis-role"
-echo "  RoleBinding: ${SERVICE_ACCOUNT}-fis-binding"
+echo "  Role: ${SERVICE_ACCOUNT}-role"
+echo "  RoleBinding: ${SERVICE_ACCOUNT}-role-binding"

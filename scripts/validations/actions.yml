@@ -14,3 +14,9 @@ actions:
     validations:
       - verify_deployment_existence
       - verify_replicas_value
+  - action: s3:pause-replication
+    validations:
+      - verify_resource_existence
+  - action: s3:pause-relication
+    validations:
+      - verify_resource_existence

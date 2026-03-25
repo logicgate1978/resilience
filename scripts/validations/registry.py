@@ -9,6 +9,7 @@ from validations.base import ValidationContext, ValidationError
 from validations.ec2 import EC2Validator
 from validations.eks import EKSValidator
 from validations.rds import RDSValidator
+from validations.s3 import S3Validator
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +19,7 @@ _VALIDATORS = {
     "ec2": EC2Validator(),
     "eks": EKSValidator(),
     "rds": RDSValidator(),
+    "s3": S3Validator(),
 }
 
 
