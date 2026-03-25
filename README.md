@@ -186,24 +186,24 @@ Responsibilities:
     </tr>
   </thead>
   <tbody>
-    <tr><th colspan="3">EC2</th></tr>
+    <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
     <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
     <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
-    <tr><th colspan="3">RDS</th></tr>
+    <tr><th colspan="3" align="left">RDS</th></tr>
     <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
     <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
     <tr><td><code>rds:failover-global-db</code></td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
     <tr><td><code>rds:switchover-global-db</code></td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
-    <tr><th colspan="3">ASG</th></tr>
+    <tr><th colspan="3" align="left">ASG</th></tr>
     <tr><td><code>asg:pause-launch</code></td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>asg:scale</code></td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td></tr>
-    <tr><th colspan="3">Network</th></tr>
+    <tr><th colspan="3" align="left">Network</th></tr>
     <tr><td><code>network:disrupt-connectivity</code></td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
-    <tr><th colspan="3">S3</th></tr>
+    <tr><th colspan="3" align="left">S3</th></tr>
     <tr><td><code>s3:pause-replication</code></td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
-    <tr><th colspan="3">EKS</th></tr>
+    <tr><th colspan="3" align="left">EKS</th></tr>
     <tr><td><code>eks:delete-pod</code></td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td></tr>
     <tr><td><code>eks:pod-cpu-stress</code></td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td></tr>
     <tr><td><code>eks:pod-io-stress</code></td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td></tr>
@@ -217,115 +217,84 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
 
 ## Manifest Design
 
-### Top-Level Fields
-
-| Field | Required | Applies To | Description |
-| --- | --- | --- | --- |
-| `resilience_test_type` | Yes | All manifests | Selects the execution mode. Current values are `component`, `site`, and `region`. |
-| `region` | Yes for `component` and `site` | Component, Site | AWS Region used for FIS execution, resource discovery, and single-Region observability. |
-| `zone` | Yes for `site` | Site | Availability Zone scope for site-level tests. This is used to narrow supported resources to one AZ. |
-| `primary_region` | Yes for `region` | Region | Current active Region for the workload. Used for Aurora Global Database failover or switchover planning. |
-| `secondary_region` | Yes for `region` | Region | Current standby Region for the workload. Used as the alternate side for regional switching. |
-| `services` | Yes | All manifests | List of service/action blocks that describe what resilience action to run. |
-| `observability` | No | All manifests | Optional configuration for health checks and CloudWatch metric collection around the experiment window. |
-
-### Service Block Fields
-
-Each entry under `services:` is a service/action block.
-
-| Field | Required | Applies To | Description |
-| --- | --- | --- | --- |
-| `name` | Yes | All service blocks | Logical service name such as `ec2`, `rds`, `asg`, `network`, or `eks`. |
-| `action` | Yes | All service blocks | Action to run for that service, for example `terminate`, `reboot`, `failover`, or `delete-pod`. |
-| `tags` | Usually yes | Tag-discovered actions | Comma-separated `key=value` filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags. |
-| `duration` | Depends on action | Actions that require a time window | ISO-8601 duration such as `PT30M`. Used by actions like `ec2:stop`, `ec2:pause-launch`, `asg:pause-launch`, and `network:disrupt-connectivity`. |
-| `instance_count` | Optional | `ec2` instance actions | Narrows selected EC2 instances to the first N deterministic matches. Used for `stop`, `reboot`, and `terminate`. |
-| `iam_roles` | Optional | `ec2:pause-launch` | Comma-separated IAM role names to resolve for the EC2 capacity-error action. |
-| `iam_role_arns` | Optional | `ec2:pause-launch` | Explicit IAM role ARNs to target instead of resolving `iam_roles`. |
-| `parameters.max` | Yes for `asg:scale` | `asg:scale` | Target maximum capacity for the Auto Scaling Group. |
-| `parameters.min` | Optional | `asg:scale` | Target minimum capacity. Defaults to `0` when omitted. |
-| `parameters.desired` | Optional | `asg:scale` | Target desired capacity. Defaults to the configured `max` when omitted. |
-| `parameters.wait_for_ready` | Optional | `asg:scale`, `eks:scale-deployment` | Whether the custom scaler waits until the target reaches the requested steady state. |
-| `parameters.timeout_seconds` | Optional | `asg:scale`, `eks:scale-deployment` | Per-action timeout for custom readiness polling. |
-| `destination_region` | Yes for `s3:pause-replication` | `s3:pause-replication` | Region where the destination replication buckets are located. |
-| `destination_buckets` | Optional | `s3:pause-replication` | Optional list of destination S3 bucket names to narrow which replication destinations are paused. |
-| `prefixes` | Optional | `s3:pause-replication` | Optional list of S3 object key prefixes to narrow replication rules that are paused. |
-| `target` | Required for structured actions | `eks` structured actions, custom actions | Nested target object for actions that need more than tag-based selection. |
-| `parameters` | Required for many structured actions | `eks` structured actions, custom actions | Nested action-parameter object for actions that require extra runtime parameters. |
-| `from` | Yes for Aurora Global Database region actions | `rds:failover-global-db`, `rds:switchover-global-db` | Indicates whether the workload is currently active in the `primary` or `secondary` Region. |
-| `use_arc` | Optional | Region actions | Chooses the execution engine for supported regional actions. `true` uses ARC Region switch; `false` uses a custom non-ARC implementation such as boto3. |
-
-### EKS `target` Fields
-
-For EKS pod actions, the `target:` block describes how pods are selected. For `eks:terminate-nodegroup-instances`, the target can instead supply explicit managed node group ARNs. For `eks:scale-deployment`, the target identifies the Kubernetes Deployment.
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `cluster_identifier` | Yes for pod-targeted EKS actions | EKS cluster name used by the FIS pod target. |
-| `namespace` | Yes for pod-targeted EKS actions | Kubernetes namespace containing the target pods. |
-| `selector_type` | Yes for pod-targeted EKS actions | Selector type passed to FIS. The current manifest examples use `labelSelector`. |
-| `selector_value` | Yes for pod-targeted EKS actions | Selector expression used to match pods, for example `app=my-service`. |
-| `count` | Optional | Number of matching resources to target. Converted into FIS `COUNT(n)` selection mode. |
-| `selection_mode` | Optional | Explicit FIS selection mode. If set, it overrides `count`. |
-| `nodegroup_arn` | Optional | Explicit managed node group ARN for `eks:terminate-nodegroup-instances`. |
-| `nodegroup_arns` | Optional | Explicit list of managed node group ARNs for `eks:terminate-nodegroup-instances`. |
-| `deployment_name` | Yes for `eks:scale-deployment` | Kubernetes Deployment name to scale. |
-
-### EKS `parameters` Fields
-
-For EKS pod actions, the `parameters:` block supplies action parameters.
-
-Important note:
-
-- `parameters:` is optional in the current implementation
-- `kubernetes_service_account` is still required for supported EKS pod actions
-- `kubernetes_service_account` can be provided either at the service-block level or inside `parameters:`
-- if optional fields such as `workers`, `percent`, or `max_errors_percent` are omitted, AWS FIS uses its own default values for that action
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `kubernetes_service_account` | Yes | Kubernetes service account name used by the FIS pod action inside the cluster. |
-| `grace_period_seconds` | No | Grace period before pod deletion. |
-| `workers` | No | Number of stress workers for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
-| `percent` | No | Stress intensity percentage for `pod-cpu-stress`, `pod-io-stress`, and `pod-memory-stress`. |
-| `max_errors_percent` | No | Allowed percentage of errors before FIS fails the action. |
-| `instance_termination_percentage` | Yes for `terminate-nodegroup-instances` | Percentage of managed node group instances to terminate. |
-| `replicas` | Yes for `eks:scale-deployment` | Desired absolute replica count for the target Deployment. |
-| `wait_for_ready` | No | Whether the custom scaler waits until the Deployment is reconciled and ready. Default is `true`. |
-| `timeout_seconds` | No | Per-action timeout for custom Deployment scaling readiness. |
-| `fis_pod_container_image` | No | Optional custom container image for the helper pod used by the FIS action. |
-| `fis_pod_labels` | No | Optional labels applied to the FIS orchestration pod. |
-| `fis_pod_annotations` | No | Optional annotations applied to the FIS orchestration pod. |
-| `fis_pod_security_policy` | No | Optional Kubernetes Security Standards policy for the FIS orchestration pod and ephemeral containers. |
-
-### Observability Fields
-
-The `observability:` block controls collection before, during, and after the experiment.
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `start_before` | No | Number of minutes to collect observability before starting the action. |
-| `stop_after` | No | Number of minutes to continue collecting observability after the action completes. |
-| `health_check` | No | Nested HTTP health-check configuration. |
-| `cloudwatch` | No | Nested CloudWatch metric collection configuration. |
-
-### `observability.health_check` Fields
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `endpoint` | Yes when `health_check` is used | HTTP endpoint to probe periodically. |
-| `http_method` | No | HTTP method to use, typically `get`. |
-| `healthy_status_code` | No | Expected healthy response code, typically `200`. |
-| `interval` | No | Polling interval in seconds. |
-
-### `observability.cloudwatch.load_balancer` Fields
-
-| Field | Required | Description |
-| --- | --- | --- |
-| `type` | Yes when load balancer metrics are used | Load balancer type such as `alb`. |
-| `name` | Optional | Explicit load balancer name. |
-| `tags` | Optional | Tag filters used to discover the load balancer when `name` is not supplied. |
-| `metrics` | Yes when load balancer metrics are used | List of CloudWatch metric names to collect for the resolved load balancer. |
+<table>
+  <thead>
+    <tr>
+      <th>Field</th>
+      <th>Required</th>
+      <th>Applies To</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><th colspan="4" align="left">Top-Level Fields</th></tr>
+    <tr><td><code>resilience_test_type</code></td><td>Yes</td><td>All manifests</td><td>Selects the execution mode. Current values are <code>component</code>, <code>site</code>, and <code>region</code>.</td></tr>
+    <tr><td><code>region</code></td><td>Yes for <code>component</code> and <code>site</code></td><td>Component, Site</td><td>AWS Region used for FIS execution, resource discovery, and single-Region observability.</td></tr>
+    <tr><td><code>zone</code></td><td>Yes for <code>site</code></td><td>Site</td><td>Availability Zone scope for site-level tests. This is used to narrow supported resources to one AZ.</td></tr>
+    <tr><td><code>primary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current active Region for the workload. Used for Aurora Global Database failover or switchover planning.</td></tr>
+    <tr><td><code>secondary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current standby Region for the workload. Used as the alternate side for regional switching.</td></tr>
+    <tr><td><code>services</code></td><td>Yes</td><td>All manifests</td><td>List of service/action blocks that describe what resilience action to run.</td></tr>
+    <tr><td><code>observability</code></td><td>No</td><td>All manifests</td><td>Optional configuration for health checks and CloudWatch metric collection around the experiment window.</td></tr>
+    <tr><th colspan="4" align="left">Service Block Fields</th></tr>
+    <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
+    <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
+    <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
+    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
+    <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
+    <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
+    <tr><td><code>service.iam_role_arns</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Explicit IAM role ARNs to target instead of resolving <code>iam_roles</code>.</td></tr>
+    <tr><td><code>service.destination_region</code></td><td>Yes for <code>s3:pause-replication</code></td><td><code>s3:pause-replication</code></td><td>Region where the destination replication buckets are located.</td></tr>
+    <tr><td><code>service.destination_buckets</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of destination S3 bucket names to narrow which replication destinations are paused.</td></tr>
+    <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
+    <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
+    <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
+    <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
+    <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
+    <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
+    <tr><th colspan="4" align="left">Service Target Fields</th></tr>
+    <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>EKS cluster name used by the FIS pod target.</td></tr>
+    <tr><td><code>service.target.namespace</code></td><td>Yes for pod-targeted EKS actions and <code>eks:scale-deployment</code></td><td>EKS actions</td><td>Kubernetes namespace containing the target pods or target Deployment.</td></tr>
+    <tr><td><code>service.target.selector_type</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector type passed to FIS. The current manifest examples use <code>labelSelector</code>.</td></tr>
+    <tr><td><code>service.target.selector_value</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector expression used to match pods, for example <code>app=my-service</code>.</td></tr>
+    <tr><td><code>service.target.count</code></td><td>Optional</td><td>EKS pod actions</td><td>Number of matching resources to target. Converted into FIS <code>COUNT(n)</code> selection mode.</td></tr>
+    <tr><td><code>service.target.selection_mode</code></td><td>Optional</td><td>EKS pod actions</td><td>Explicit FIS selection mode. If set, it overrides <code>count</code>.</td></tr>
+    <tr><td><code>service.target.nodegroup_arn</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit managed node group ARN for the EKS node group termination action.</td></tr>
+    <tr><td><code>service.target.nodegroup_arns</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit list of managed node group ARNs for the EKS node group termination action.</td></tr>
+    <tr><td><code>service.target.deployment_name</code></td><td>Yes for <code>eks:scale-deployment</code></td><td><code>eks:scale-deployment</code></td><td>Kubernetes Deployment name to scale.</td></tr>
+    <tr><th colspan="4" align="left">Service Parameter Fields</th></tr>
+    <tr><td><code>service.parameters.max</code></td><td>Yes for <code>asg:scale</code></td><td><code>asg:scale</code></td><td>Target maximum capacity for the Auto Scaling Group.</td></tr>
+    <tr><td><code>service.parameters.min</code></td><td>Optional</td><td><code>asg:scale</code></td><td>Target minimum capacity. Defaults to <code>0</code> when omitted.</td></tr>
+    <tr><td><code>service.parameters.desired</code></td><td>Optional</td><td><code>asg:scale</code></td><td>Target desired capacity. Defaults to the configured <code>max</code> when omitted.</td></tr>
+    <tr><td><code>service.parameters.wait_for_ready</code></td><td>Optional</td><td><code>asg:scale</code>, <code>eks:scale-deployment</code></td><td>Whether the custom scaler waits until the target reaches the requested steady state.</td></tr>
+    <tr><td><code>service.parameters.timeout_seconds</code></td><td>Optional</td><td><code>asg:scale</code>, <code>eks:scale-deployment</code></td><td>Per-action timeout for custom readiness polling.</td></tr>
+    <tr><td><code>service.parameters.kubernetes_service_account</code></td><td>Yes for supported EKS pod actions</td><td>EKS pod actions</td><td>Kubernetes service account name used by the FIS pod action inside the cluster. The <code>service.parameters</code> block itself is optional, but the service account value is still required either here or as <code>service.kubernetes_service_account</code>.</td></tr>
+    <tr><td><code>service.parameters.grace_period_seconds</code></td><td>No</td><td><code>eks:delete-pod</code></td><td>Grace period before pod deletion.</td></tr>
+    <tr><td><code>service.parameters.workers</code></td><td>No</td><td><code>eks:pod-cpu-stress</code>, <code>eks:pod-io-stress</code>, <code>eks:pod-memory-stress</code></td><td>Number of stress workers.</td></tr>
+    <tr><td><code>service.parameters.percent</code></td><td>No</td><td><code>eks:pod-cpu-stress</code>, <code>eks:pod-io-stress</code>, <code>eks:pod-memory-stress</code></td><td>Stress intensity percentage.</td></tr>
+    <tr><td><code>service.parameters.max_errors_percent</code></td><td>No</td><td>EKS pod actions</td><td>Allowed percentage of errors before FIS fails the action.</td></tr>
+    <tr><td><code>service.parameters.instance_termination_percentage</code></td><td>Yes for <code>eks:terminate-nodegroup-instances</code></td><td><code>eks:terminate-nodegroup-instances</code></td><td>Percentage of managed node group instances to terminate.</td></tr>
+    <tr><td><code>service.parameters.replicas</code></td><td>Yes for <code>eks:scale-deployment</code></td><td><code>eks:scale-deployment</code></td><td>Desired absolute replica count for the target Deployment.</td></tr>
+    <tr><td><code>service.parameters.fis_pod_container_image</code></td><td>No</td><td>EKS pod actions</td><td>Optional custom container image for the helper pod used by the FIS action.</td></tr>
+    <tr><td><code>service.parameters.fis_pod_labels</code></td><td>No</td><td>EKS pod actions</td><td>Optional labels applied to the FIS orchestration pod.</td></tr>
+    <tr><td><code>service.parameters.fis_pod_annotations</code></td><td>No</td><td>EKS pod actions</td><td>Optional annotations applied to the FIS orchestration pod.</td></tr>
+    <tr><td><code>service.parameters.fis_pod_security_policy</code></td><td>No</td><td>EKS pod actions</td><td>Optional Kubernetes Security Standards policy for the FIS orchestration pod and ephemeral containers.</td></tr>
+    <tr><th colspan="4" align="left">Observability Fields</th></tr>
+    <tr><td><code>observability.start_before</code></td><td>No</td><td>All manifests</td><td>Number of minutes to collect observability before starting the action.</td></tr>
+    <tr><td><code>observability.stop_after</code></td><td>No</td><td>All manifests</td><td>Number of minutes to continue collecting observability after the action completes.</td></tr>
+    <tr><td><code>observability.health_check</code></td><td>No</td><td>All manifests</td><td>Nested HTTP health-check configuration.</td></tr>
+    <tr><td><code>observability.cloudwatch</code></td><td>No</td><td>All manifests</td><td>Nested CloudWatch metric collection configuration.</td></tr>
+    <tr><th colspan="4" align="left">Observability Health Check Fields</th></tr>
+    <tr><td><code>observability.health_check.endpoint</code></td><td>Yes when <code>observability.health_check</code> is used</td><td>Health check</td><td>HTTP endpoint to probe periodically.</td></tr>
+    <tr><td><code>observability.health_check.http_method</code></td><td>No</td><td>Health check</td><td>HTTP method to use, typically <code>get</code>.</td></tr>
+    <tr><td><code>observability.health_check.healthy_status_code</code></td><td>No</td><td>Health check</td><td>Expected healthy response code, typically <code>200</code>.</td></tr>
+    <tr><td><code>observability.health_check.interval</code></td><td>No</td><td>Health check</td><td>Polling interval in seconds.</td></tr>
+    <tr><th colspan="4" align="left">Observability CloudWatch Load Balancer Fields</th></tr>
+    <tr><td><code>observability.cloudwatch.load_balancer.type</code></td><td>Yes when load balancer metrics are used</td><td>Load balancer metrics</td><td>Load balancer type such as <code>alb</code>.</td></tr>
+    <tr><td><code>observability.cloudwatch.load_balancer.name</code></td><td>Optional</td><td>Load balancer metrics</td><td>Explicit load balancer name.</td></tr>
+    <tr><td><code>observability.cloudwatch.load_balancer.tags</code></td><td>Optional</td><td>Load balancer metrics</td><td>Tag filters used to discover the load balancer when <code>name</code> is not supplied.</td></tr>
+    <tr><td><code>observability.cloudwatch.load_balancer.metrics</code></td><td>Yes when load balancer metrics are used</td><td>Load balancer metrics</td><td>List of CloudWatch metric names to collect for the resolved load balancer.</td></tr>
+  </tbody>
+</table>
 
 ### Component Example
 
