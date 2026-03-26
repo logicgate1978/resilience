@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
+from typing import Any, ClassVar, Dict, List, Optional, Type
 
 
 @dataclass
@@ -60,8 +60,8 @@ class ServiceTemplateGenerator(ABC):
     def get_action_id(self, action: str) -> str:
         return self.action_map[action]
 
-    def get_target_spec(self, action: str) -> Dict[str, str]:
-        return self.target_spec_map[action]
+    def get_target_spec(self, action: str) -> Optional[Dict[str, str]]:
+        return self.target_spec_map.get(action)
 
     def get_selection_mode(
         self,
@@ -116,16 +116,21 @@ class ServiceTemplateGenerator(ABC):
         manifest: Dict[str, Any],
         svc: ManifestService,
         action_id: str,
-        target_key: str,
-        target_ref_name: str,
+        target_key: Optional[str],
+        target_ref_name: Optional[str],
         start_after: Optional[str],
     ) -> Dict[str, Any]:
-        _ = start_after
+        _ = manifest
         action_obj: Dict[str, Any] = {
             "actionId": action_id,
             "description": f"{svc.name}:{svc.action}",
-            "targets": {target_key: target_ref_name},
         }
+
+        if target_key and target_ref_name:
+            action_obj["targets"] = {target_key: target_ref_name}
+
+        if start_after:
+            action_obj["startAfter"] = [start_after]
 
         params = self.build_action_parameters(manifest=manifest, svc=svc, action_id=action_id)
         if params:

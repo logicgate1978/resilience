@@ -112,34 +112,38 @@ def generate_template_payload(
         generator = _find_service_generator(svc.name, svc.action)
         action_id = generator.get_action_id(svc.action)
         spec = generator.get_target_spec(svc.action)
-        resource_type = spec["resourceType"]
-        target_key = spec["target_key"]
+        target_key: Optional[str] = None
+        target_name: Optional[str] = None
 
-        resource_arns = generator.get_resource_arns(manifest=manifest, svc=svc)
-        resource_parameters = generator.get_target_parameters(manifest=manifest, svc=svc)
-        this_selection_mode = generator.get_selection_mode(
-            manifest=manifest,
-            svc=svc,
-            default_selection_mode=selection_mode,
-        )
+        if spec is not None:
+            resource_type = spec["resourceType"]
+            target_key = spec["target_key"]
 
-        target_name = f"t_{svc.name}_{svc.action}_{idx}"
-        targets[target_name] = build_target(
-            name=target_name,
-            resource_type=resource_type,
-            selection_mode=this_selection_mode,
-            resource_tags=parse_tags(svc.tags) if (resource_arns is None) else None,
-            resource_arns=resource_arns,
-            resource_parameters=resource_parameters,
-        )
+            resource_arns = generator.get_resource_arns(manifest=manifest, svc=svc)
+            resource_parameters = generator.get_target_parameters(manifest=manifest, svc=svc)
+            this_selection_mode = generator.get_selection_mode(
+                manifest=manifest,
+                svc=svc,
+                default_selection_mode=selection_mode,
+            )
 
-        generator.apply_site_scope(
-            target=targets[target_name],
-            manifest=manifest,
-            resource_type=resource_type,
-            resource_arns=resource_arns,
-            apply_site_scope_to_target_fn=apply_site_scope_to_target,
-        )
+            target_name = f"t_{svc.name}_{svc.action}_{idx}"
+            targets[target_name] = build_target(
+                name=target_name,
+                resource_type=resource_type,
+                selection_mode=this_selection_mode,
+                resource_tags=parse_tags(svc.tags) if (resource_arns is None) else None,
+                resource_arns=resource_arns,
+                resource_parameters=resource_parameters,
+            )
+
+            generator.apply_site_scope(
+                target=targets[target_name],
+                manifest=manifest,
+                resource_type=resource_type,
+                resource_arns=resource_arns,
+                apply_site_scope_to_target_fn=apply_site_scope_to_target,
+            )
 
         action_name = f"a_{svc.name}_{svc.action}_{idx}"
         actions[action_name] = generator.build_action(

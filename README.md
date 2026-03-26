@@ -186,6 +186,8 @@ Responsibilities:
     </tr>
   </thead>
   <tbody>
+    <tr><th colspan="3" align="left">Common</th></tr>
+    <tr><td><code>common:wait</code></td><td>Pause the experiment timeline for a fixed duration between other actions.</td><td><code>aws:fis:wait</code></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
@@ -236,10 +238,10 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>services</code></td><td>Yes</td><td>All manifests</td><td>List of service/action blocks that describe what resilience action to run.</td></tr>
     <tr><td><code>observability</code></td><td>No</td><td>All manifests</td><td>Optional configuration for health checks and CloudWatch metric collection around the experiment window.</td></tr>
     <tr><th colspan="4" align="left">Service Block Fields</th></tr>
-    <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
+    <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>common</code>, <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
     <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
-    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
+    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
     <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
     <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
     <tr><td><code>service.iam_role_arns</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Explicit IAM role ARNs to target instead of resolving <code>iam_roles</code>.</td></tr>

@@ -5,6 +5,9 @@ services:
   action: terminate
   tags: environment=development,project=clouddash
   instance_count: 1
+- name: common
+  action: wait
+  duration: PT2M
 - name: rds
   action: reboot
   tags: environment=development,project=clouddash
