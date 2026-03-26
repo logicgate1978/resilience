@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from utility import apply_site_scope_to_target, normalize_service_name, parse_tags, utc_ts
 
@@ -32,6 +32,78 @@ def _find_service_generator(service_name: str, action: str) -> ServiceTemplateGe
     raise ValueError(f"Unsupported service action: {service_name}:{action}")
 
 
+def _parse_start_after_refs(value: Any, field_name: str) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        refs = [value]
+    elif isinstance(value, list):
+        refs = value
+    else:
+        raise ValueError(f"{field_name} must be a string or list of strings if provided.")
+
+    out: List[str] = []
+    for raw in refs:
+        text = str(raw or "").strip().lower()
+        if not text:
+            continue
+        out.append(text)
+    return out
+
+
+def _build_service_reference_map(services: List[ManifestService]) -> Dict[str, Tuple[int, str]]:
+    totals: Dict[str, int] = {}
+    for svc in services:
+        key = f"{svc.name}:{svc.action}"
+        totals[key] = totals.get(key, 0) + 1
+
+    refs: Dict[str, Tuple[int, str]] = {}
+    occurrences: Dict[str, int] = {}
+    for index, svc in enumerate(services, start=1):
+        key = f"{svc.name}:{svc.action}"
+        occurrences[key] = occurrences.get(key, 0) + 1
+        ordinal = occurrences[key]
+        action_name = f"a_{svc.name}_{svc.action}_{index}"
+
+        refs[f"{key}#{ordinal}"] = (index, action_name)
+        if totals[key] == 1:
+            refs[key] = (index, action_name)
+
+    return refs
+
+
+def _resolve_start_after(
+    services: List[ManifestService],
+) -> Dict[int, List[str]]:
+    ref_map = _build_service_reference_map(services)
+    resolved: Dict[int, List[str]] = {}
+
+    for index, svc in enumerate(services, start=1):
+        dependencies: List[str] = []
+        seen = set()
+        for ref in svc.start_after:
+            target = ref_map.get(ref)
+            if target is None:
+                raise ValueError(
+                    f"services[{index - 1}].start_after references unknown action '{ref}'. "
+                    "Use '<service>:<action>' for unique actions or '<service>:<action>#<n>' when duplicates exist."
+                )
+
+            target_index, target_action_name = target
+            if target_index >= index:
+                raise ValueError(
+                    f"services[{index - 1}].start_after reference '{ref}' must point to an earlier service action."
+                )
+
+            if target_action_name not in seen:
+                dependencies.append(target_action_name)
+                seen.add(target_action_name)
+
+        resolved[index] = dependencies
+
+    return resolved
+
+
 def _parse_manifest_services(manifest: Dict[str, Any]) -> List[ManifestService]:
     services_raw = manifest.get("services")
     if not isinstance(services_raw, list) or not services_raw:
@@ -48,6 +120,7 @@ def _parse_manifest_services(manifest: Dict[str, Any]) -> List[ManifestService]:
         iam_role_arns = s.get("iam_role_arns")
         iam_roles = s.get("iam_roles")
         instance_count = s.get("instance_count")
+        start_after = _parse_start_after_refs(s.get("start_after"), f"services[{i}].start_after")
 
         if not name or not action:
             raise ValueError(f"services[{i}] must include 'name' and 'action'.")
@@ -77,6 +150,7 @@ def _parse_manifest_services(manifest: Dict[str, Any]) -> List[ManifestService]:
                 iam_role_arns=iam_role_arns,
                 iam_roles=iam_roles,
                 instance_count=instance_count,
+                start_after=start_after,
                 config=dict(s),
             )
         )
@@ -103,10 +177,10 @@ def generate_template_payload(
             raise ValueError("For resilience_test_type: site, top-level 'zone' is required (e.g. eu-west-1a).")
 
     services = _parse_manifest_services(manifest)
+    start_after_map = _resolve_start_after(services)
 
     targets: Dict[str, Any] = {}
     actions: Dict[str, Any] = {}
-    prev_action_name: Optional[str] = None
 
     for idx, svc in enumerate(services, start=1):
         generator = _find_service_generator(svc.name, svc.action)
@@ -152,9 +226,8 @@ def generate_template_payload(
             action_id=action_id,
             target_key=target_key,
             target_ref_name=target_name,
-            start_after=prev_action_name,
+            start_after=start_after_map.get(idx) or None,
         )
-        prev_action_name = action_name
 
     template_name = f"resilience-{rtype}-{utc_ts()}"
     return {

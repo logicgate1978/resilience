@@ -14,6 +14,7 @@ class ManifestService:
     iam_role_arns: Optional[List[str]] = None
     iam_roles: Optional[str] = None
     instance_count: Optional[int] = None
+    start_after: List[str] = field(default_factory=list)
     config: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -118,7 +119,7 @@ class ServiceTemplateGenerator(ABC):
         action_id: str,
         target_key: Optional[str],
         target_ref_name: Optional[str],
-        start_after: Optional[str],
+        start_after: Optional[List[str]],
     ) -> Dict[str, Any]:
         _ = manifest
         action_obj: Dict[str, Any] = {
@@ -130,7 +131,7 @@ class ServiceTemplateGenerator(ABC):
             action_obj["targets"] = {target_key: target_ref_name}
 
         if start_after:
-            action_obj["startAfter"] = [start_after]
+            action_obj["startAfter"] = list(start_after)
 
         params = self.build_action_parameters(manifest=manifest, svc=svc, action_id=action_id)
         if params:

@@ -8,6 +8,7 @@ services:
 - name: asg
   action: scale
   tags: environment=development,project=clouddash
+  start_after: common:wait
   parameters:
     max: 2
     # min defaults to 0 when omitted.

@@ -240,6 +240,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><th colspan="4" align="left">Service Block Fields</th></tr>
     <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>common</code>, <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
     <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
+    <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
     <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
     <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
@@ -301,13 +302,13 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
 
 Important sequencing note:
 
-- `service.start_after` is not currently a manifest field.
-- For one manifest, actions are executed sequentially in the order they appear under `services:`.
-- For native FIS actions, the framework translates that manifest order into FIS `startAfter` chaining automatically.
+- Actions now run in parallel by default when `service.start_after` is omitted.
+- For native FIS actions, that matches FIS behavior when no `startAfter` is set.
+- For custom-only manifests, the framework also uses dependency-driven execution and only waits when `service.start_after` is declared.
 
 ### Component Example
 
-See `manifests/component-1.yml`.
+See `manifests/component-ec2.yml`.
 
 Example shape:
 
@@ -319,11 +320,17 @@ services:
   action: terminate
   tags: environment=development,project=clouddash
   instance_count: 1
+- name: common
+  action: wait
+  duration: PT2M
+  start_after: ec2:terminate
 - name: rds
   action: reboot
   tags: environment=development,project=clouddash
+  start_after: common:wait
 - name: eks
   action: delete-pod
+  start_after: rds:reboot
   target:
     cluster_identifier: my-eks-cluster
     namespace: default
@@ -869,7 +876,7 @@ Example:
 From `scripts/`:
 
 ```powershell
-python fis.py --manifest ..\manifests\component-1.yml --fis-role-arn <fis-role-arn>
+python fis.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
 ```
 
 ### Run a Region Test

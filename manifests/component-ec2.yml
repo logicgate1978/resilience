@@ -8,9 +8,11 @@ services:
 - name: common
   action: wait
   duration: PT2M
+  start_after: ec2:terminate
 - name: rds
   action: reboot
   tags: environment=development,project=clouddash
+  start_after: common:wait
 
 observability:
   start_before: 2
