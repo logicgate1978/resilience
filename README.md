@@ -299,6 +299,12 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
   </tbody>
 </table>
 
+Important sequencing note:
+
+- `service.start_after` is not currently a manifest field.
+- For one manifest, actions are executed sequentially in the order they appear under `services:`.
+- For native FIS actions, the framework translates that manifest order into FIS `startAfter` chaining automatically.
+
 ### Component Example
 
 See `manifests/component-1.yml`.
