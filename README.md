@@ -187,7 +187,7 @@ Responsibilities:
   </thead>
   <tbody>
     <tr><th colspan="3" align="left">Common</th></tr>
-    <tr><td><code>common:wait</code></td><td>Pause the experiment timeline for a fixed duration between other actions.</td><td><code>aws:fis:wait</code></td></tr>
+    <tr><td><code>common:wait</code></td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
@@ -250,6 +250,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
     <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
+    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code></td><td>Chooses the execution engine for <code>common:wait</code>. Defaults to <code>true</code>. When set to <code>false</code>, the framework implements the wait directly in Python so custom-only manifests can still use it.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
@@ -509,6 +510,7 @@ Custom component actions are used when the framework needs to execute a componen
 
 Current implementation:
 
+- `common:wait` when `service.use_fis = false`
 - `asg:scale`
 - `eks:scale-deployment`
 

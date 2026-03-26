@@ -1,6 +1,10 @@
 resilience_test_type: component
 region: ap-southeast-1
 services:
+- name: common
+  action: wait
+  duration: PT30S
+  use_fis: false
 - name: asg
   action: scale
   tags: environment=development,project=clouddash
