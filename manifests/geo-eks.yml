@@ -1,6 +1,7 @@
 resilience_test_type: region
 primary_region: ap-southeast-1
 secondary_region: ap-southeast-2
+
 services:
 - name: eks
   action: scale-deployment
@@ -13,6 +14,7 @@ services:
     replicas: 3
     wait_for_ready: true
     timeout_seconds: 600
+
 - name: eks
   action: scale-deployment
   target:
