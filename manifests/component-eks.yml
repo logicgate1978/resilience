@@ -126,7 +126,3 @@ services:
 #     replicas: 2
 #     wait_for_ready: true
 #     timeout_seconds: 600
-
-observability:
-  start_before: 1
-  stop_after: 1

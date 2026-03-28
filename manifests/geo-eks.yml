@@ -6,23 +6,23 @@ services:
 - name: eks
   action: scale-deployment
   target:
-    region: secondary
-    cluster_identifier: my-secondary-eks-cluster
+    region: primary
+    cluster_identifier: resilience-eks-20260328122508
     namespace: default
     deployment_name: my-service
   parameters:
-    replicas: 3
+    replicas: 0
     wait_for_ready: true
     timeout_seconds: 600
 
 - name: eks
   action: scale-deployment
   target:
-    region: primary
-    cluster_identifier: my-primary-eks-cluster
+    region: secondary
+    cluster_identifier: resilience-eks-20260328130249
     namespace: default
     deployment_name: my-service
   parameters:
-    replicas: 0
+    replicas: 3
     wait_for_ready: true
     timeout_seconds: 600
