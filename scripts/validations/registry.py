@@ -7,6 +7,7 @@ import yaml
 from utility import normalize_service_name
 from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
+from validations.dns import DNSValidator
 from validations.ec2 import EC2Validator
 from validations.eks import EKSValidator
 from validations.rds import RDSValidator
@@ -18,6 +19,7 @@ ACTIONS_PATH = os.path.join(SCRIPT_DIR, "actions.yml")
 
 _VALIDATORS = {
     "asg": ASGValidator(),
+    "dns": DNSValidator(),
     "ec2": EC2Validator(),
     "eks": EKSValidator(),
     "rds": RDSValidator(),

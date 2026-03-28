@@ -188,6 +188,9 @@ Responsibilities:
   <tbody>
     <tr><th colspan="3" align="left">Common</th></tr>
     <tr><td><code>common:wait</code></td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td></tr>
+    <tr><th colspan="3" align="left">DNS</th></tr>
+    <tr><td><code>dns:set-value</code></td><td>Update the value of a simple Route 53 DNS record.</td><td></td></tr>
+    <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier.</td><td></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
@@ -231,7 +234,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
   <tbody>
     <tr><th colspan="4" align="left">Top-Level Fields</th></tr>
     <tr><td><code>resilience_test_type</code></td><td>Yes</td><td>All manifests</td><td>Selects the execution mode. Current values are <code>component</code>, <code>site</code>, and <code>region</code>.</td></tr>
-    <tr><td><code>region</code></td><td>Yes for <code>component</code> and <code>site</code></td><td>Component, Site</td><td>AWS Region used for FIS execution, resource discovery, and single-Region observability.</td></tr>
+    <tr><td><code>region</code></td><td>Yes for <code>component</code> and <code>site</code>, except some global custom actions</td><td>Component, Site</td><td>AWS Region used for FIS execution, resource discovery, and single-Region observability. For custom-only global actions such as Route 53 DNS, the framework can fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when <code>region</code> is omitted.</td></tr>
     <tr><td><code>zone</code></td><td>Yes for <code>site</code></td><td>Site</td><td>Availability Zone scope for site-level tests. This is used to narrow supported resources to one AZ.</td></tr>
     <tr><td><code>primary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current active Region for the workload. Used for Aurora Global Database failover or switchover planning.</td></tr>
     <tr><td><code>secondary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current standby Region for the workload. Used as the alternate side for regional switching.</td></tr>
@@ -242,6 +245,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
     <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
+    <tr><td><code>service.value</code></td><td>Yes for some actions</td><td><code>dns:set-value</code>, <code>dns:set-weight</code></td><td>Action-specific value payload. For <code>dns:set-value</code>, this is the target record value. For <code>dns:set-weight</code>, this is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
     <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
     <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
     <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
@@ -257,6 +261,9 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
     <tr><th colspan="4" align="left">Service Target Fields</th></tr>
     <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>EKS cluster name used by the FIS pod target.</td></tr>
+    <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
+    <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
+    <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
     <tr><td><code>service.target.namespace</code></td><td>Yes for pod-targeted EKS actions and <code>eks:scale-deployment</code></td><td>EKS actions</td><td>Kubernetes namespace containing the target pods or target Deployment.</td></tr>
     <tr><td><code>service.target.selector_type</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector type passed to FIS. The current manifest examples use <code>labelSelector</code>.</td></tr>
     <tr><td><code>service.target.selector_value</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector expression used to match pods, for example <code>app=my-service</code>.</td></tr>
@@ -524,6 +531,8 @@ Custom component actions are used when the framework needs to execute a componen
 Current implementation:
 
 - `common:wait` when `service.use_fis = false`
+- `dns:set-value`
+- `dns:set-weight`
 - `asg:scale`
 - `eks:scale-deployment`
 

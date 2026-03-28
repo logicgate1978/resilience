@@ -245,8 +245,10 @@ def main() -> int:
         return 0
 
     region = manifest.get("region")
+    if not region and manifest_has_custom_actions(manifest):
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
     if not region:
-        raise ValueError("manifest.yml must include top-level region")
+        raise ValueError("manifest.yml must include top-level region unless the manifest is custom-only and uses a global control plane such as Route 53 DNS.")
 
     session = boto3.Session(region_name=region)
     zone = manifest.get("zone") if rtype == "site" else None

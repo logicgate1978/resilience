@@ -7,6 +7,13 @@ services:
   tags: environment=development,project=clouddash
   from: primary
   use_arc: false
+- name: dns
+  action: set
+  target:
+    hosted_zone: logicgate.biz
+    record_name: dev.logicgate.biz
+    record_type: A
+    value: 13.228.75.239
 observability:
   start_before: 2
   stop_after: 2
