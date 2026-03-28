@@ -214,7 +214,7 @@ Responsibilities:
     <tr><td><code>eks:pod-io-stress</code></td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td></tr>
     <tr><td><code>eks:pod-memory-stress</code></td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td></tr>
     <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td></tr>
-    <tr><td><code>eks:scale-deployment</code></td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API.</td><td></td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API for component or region workflows.</td><td></td></tr>
   </tbody>
 </table>
 
@@ -261,6 +261,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
     <tr><th colspan="4" align="left">Service Target Fields</th></tr>
     <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>EKS cluster name used by the FIS pod target.</td></tr>
+    <tr><td><code>service.target.region</code></td><td>Yes for region EKS scaling</td><td>Region <code>eks:scale-deployment</code></td><td>Selects whether the target EKS Deployment belongs to the manifest <code>primary</code> or <code>secondary</code> Region.</td></tr>
     <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
     <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
     <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
@@ -375,7 +376,7 @@ Site scoping is applied to targets where supported. The code already contains sp
 
 ### Region Example
 
-See `manifests/geo-1.yml`.
+See `manifests/geo-rds.yml` and `manifests/geo-eks.yml`.
 
 Example shape:
 
@@ -406,6 +407,7 @@ Notes on region manifests:
 - tags are used for discovery; the user does not need to provide the Aurora Global Database ARN or member cluster ARNs
 - `use_arc` only applies to `resilience_test_type: region`
 - if `use_arc` is omitted, the current default behavior is `true`
+- for region EKS scaling, use `service.target.region: primary|secondary` plus an explicit `cluster_identifier`
 
 ## ARC Region Switch Design
 
@@ -893,7 +895,7 @@ python fis.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role
 From `scripts/`:
 
 ```powershell
-python fis.py --manifest ..\manifests\geo-1.yml --arc-role-arn <arc-role-arn>
+python fis.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 ```
 
 ### Dry Run
@@ -901,7 +903,7 @@ python fis.py --manifest ..\manifests\geo-1.yml --arc-role-arn <arc-role-arn>
 Dry run writes payload and discovery artifacts but does not create or execute the remote action:
 
 ```powershell
-python fis.py --manifest ..\manifests\geo-1.yml --arc-role-arn <arc-role-arn> --dry-run
+python fis.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn> --dry-run
 ```
 
 ### Runtime Logging

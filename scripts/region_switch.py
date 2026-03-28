@@ -2,6 +2,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from kubernetes.client.exceptions import ApiException
+
+from component_actions.k8s_auth import create_apps_v1_api
 from utility import utc_ts
 
 from resource import discover_rds_global_clusters
@@ -58,22 +61,50 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
             raise ValueError(f"services[{i}] must be an object.")
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
-        from_side = (svc.get("from") or "").strip().lower()
-        use_arc = svc.get("use_arc", True)
-
-        if name != "rds" or action not in REGION_ACTION_CONFIG:
-            raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
-        if from_side not in ("primary", "secondary"):
-            raise ValueError(f"services[{i}].from must be 'primary' or 'secondary'.")
-        if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
-            raise ValueError(f"services[{i}].tags is required for Aurora global database discovery.")
-        if not isinstance(use_arc, bool):
-            raise ValueError(f"services[{i}].use_arc must be true or false when provided.")
+        if name == "rds" and action in REGION_ACTION_CONFIG:
+            _validate_region_rds_service(svc, i)
+            continue
+        if name == "eks" and action == "scale-deployment":
+            _validate_region_eks_service(svc, i)
+            continue
+        raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
 
 
 def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, Any]]:
     validate_region_manifest(manifest)
-    return discover_rds_global_clusters(manifest=manifest, session=session)
+    resolved: List[Dict[str, Any]] = []
+    rds_targets = discover_rds_global_clusters(manifest=manifest, session=session)
+    rds_iter = iter(rds_targets)
+    primary_region = manifest["primary_region"]
+    secondary_region = manifest["secondary_region"]
+
+    for svc in manifest.get("services") or []:
+        if not isinstance(svc, dict):
+            continue
+        name = (svc.get("name") or "").strip().lower()
+        action = (svc.get("action") or "").strip().lower()
+        if name == "rds" and action in REGION_ACTION_CONFIG:
+            resolved.append(next(rds_iter))
+        elif name == "eks" and action == "scale-deployment":
+            target = svc["target"]
+            params = svc["parameters"]
+            side = str(target.get("region") or "").strip().lower()
+            actual_region = primary_region if side == "primary" else secondary_region
+            resolved.append(
+                {
+                    "service": "eks:scale-deployment",
+                    "action": "scale-deployment",
+                    "execution_region": actual_region,
+                    "region_side": side,
+                    "cluster_identifier": str(target.get("cluster_identifier") or "").strip(),
+                    "namespace": str(target.get("namespace") or "").strip(),
+                    "deployment_name": str(target.get("deployment_name") or "").strip(),
+                    "replicas": int(params.get("replicas")),
+                    "wait_for_ready": _optional_bool(params.get("wait_for_ready"), True),
+                    "timeout_seconds": _optional_int(params.get("timeout_seconds"), 600),
+                }
+            )
+    return resolved
 
 
 def build_execution_plan(
@@ -86,13 +117,16 @@ def build_execution_plan(
     plan_name = f"region-run-{utc_ts()}".lower()
     items: List[Dict[str, Any]] = []
     for idx, target in enumerate(resolved_targets, start=1):
-        use_arc = bool(target.get("use_arc", True))
-        if use_arc:
-            if not execution_role_arn:
-                raise ValueError("ARC region switch requires an execution role ARN when use_arc=true.")
-            item = _build_arc_execution_item(manifest, target, execution_role_arn, idx)
+        if str(target.get("service") or "").strip().lower() == "eks:scale-deployment":
+            item = _build_region_eks_execution_item(target, idx)
         else:
-            item = _build_non_arc_execution_item(manifest, target, idx)
+            use_arc = bool(target.get("use_arc", True))
+            if use_arc:
+                if not execution_role_arn:
+                    raise ValueError("ARC region switch requires an execution role ARN when use_arc=true.")
+                item = _build_arc_execution_item(manifest, target, execution_role_arn, idx)
+            else:
+                item = _build_non_arc_execution_item(manifest, target, idx)
         items.append(item)
 
     if not items:
@@ -124,6 +158,13 @@ def execute_region_plan(
             )
         elif item["engine"] == "sdk":
             item_summary = _execute_sdk_item(
+                session=session,
+                item=item,
+                poll_seconds=poll_seconds,
+                timeout_seconds=timeout_seconds,
+            )
+        elif item["engine"] == "custom":
+            item_summary = _execute_region_eks_item(
                 session=session,
                 item=item,
                 poll_seconds=poll_seconds,
@@ -294,6 +335,30 @@ def _build_non_arc_execution_item(
     }
 
 
+def _build_region_eks_execution_item(
+    target: Dict[str, Any],
+    index: int,
+) -> Dict[str, Any]:
+    return {
+        "name": f"eks-scale-deployment-{index}",
+        "engine": "custom",
+        "service": target["service"],
+        "action": "scale-deployment",
+        "region": target["execution_region"],
+        "target": {
+            "regionSide": target["region_side"],
+            "clusterIdentifier": target["cluster_identifier"],
+            "namespace": target["namespace"],
+            "deploymentName": target["deployment_name"],
+        },
+        "parameters": {
+            "replicas": target["replicas"],
+            "waitForReady": target["wait_for_ready"],
+            "timeoutSeconds": target["timeout_seconds"],
+        },
+    }
+
+
 def _execute_arc_item(
     session,
     item: Dict[str, Any],
@@ -379,6 +444,147 @@ def _execute_sdk_item(
             "request": request,
             "initialResponse": response,
             "finalGlobalClusterState": final_state,
+        },
+    }
+
+
+def _execute_region_eks_item(
+    session,
+    item: Dict[str, Any],
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    start_time = datetime.now(timezone.utc).isoformat()
+    target = item["target"]
+    params = item["parameters"]
+    cluster_identifier = target["clusterIdentifier"]
+    namespace = target["namespace"]
+    deployment_name = target["deploymentName"]
+    desired_replicas = int(params["replicas"])
+    wait_for_ready = bool(params["waitForReady"])
+    effective_timeout_seconds = int(params.get("timeoutSeconds") or timeout_seconds)
+
+    print(
+        f"[INFO] Starting region custom action {item['service']} in region {item['region']} "
+        f"for deployment {namespace}/{deployment_name}"
+    )
+
+    try:
+        api = create_apps_v1_api(session, item["region"], cluster_identifier)
+        deployment = api.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+    except ApiException as e:
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "name": item["name"],
+            "engine": "custom",
+            "status": "failed",
+            "reason": f"Kubernetes API error while reading deployment: {e}",
+            "startTime": start_time,
+            "endTime": ended_at,
+            "details": {"target": target, "parameters": params},
+        }
+    except Exception as e:
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "name": item["name"],
+            "engine": "custom",
+            "status": "failed",
+            "reason": f"Failed to initialize Kubernetes API access for cluster {cluster_identifier}: {e}",
+            "startTime": start_time,
+            "endTime": ended_at,
+            "details": {"target": target, "parameters": params},
+        }
+
+    original_replicas = int(deployment.spec.replicas or 0)
+
+    try:
+        api.patch_namespaced_deployment_scale(
+            name=deployment_name,
+            namespace=namespace,
+            body={"spec": {"replicas": desired_replicas}},
+        )
+    except ApiException as e:
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return {
+            "name": item["name"],
+            "engine": "custom",
+            "status": "failed",
+            "reason": f"Kubernetes API error while scaling deployment: {e}",
+            "startTime": start_time,
+            "endTime": ended_at,
+            "details": {
+                "target": target,
+                "parameters": params,
+                "originalReplicas": original_replicas,
+            },
+        }
+
+    last_snapshot: Dict[str, Any] = {}
+    if wait_for_ready:
+        deadline = time.time() + effective_timeout_seconds
+        while True:
+            try:
+                current = api.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+            except ApiException as e:
+                ended_at = datetime.now(timezone.utc).isoformat()
+                return {
+                    "name": item["name"],
+                    "engine": "custom",
+                    "status": "failed",
+                    "reason": f"Kubernetes API error while waiting for deployment readiness: {e}",
+                    "startTime": start_time,
+                    "endTime": ended_at,
+                    "details": {
+                        "target": target,
+                        "parameters": params,
+                        "originalReplicas": original_replicas,
+                        "lastObservedStatus": last_snapshot,
+                    },
+                }
+
+            last_snapshot = _deployment_snapshot(current)
+            if _is_region_deployment_ready(current, desired_replicas):
+                break
+
+            if time.time() > deadline:
+                ended_at = datetime.now(timezone.utc).isoformat()
+                return {
+                    "name": item["name"],
+                    "engine": "custom",
+                    "status": "failed",
+                    "reason": (
+                        f"Timed out waiting for deployment {namespace}/{deployment_name} "
+                        f"in region {item['region']} to reach {desired_replicas} replica(s)."
+                    ),
+                    "startTime": start_time,
+                    "endTime": ended_at,
+                    "details": {
+                        "target": target,
+                        "parameters": params,
+                        "originalReplicas": original_replicas,
+                        "lastObservedStatus": last_snapshot,
+                    },
+                }
+            time.sleep(max(1, poll_seconds))
+
+    try:
+        final_deployment = api.read_namespaced_deployment(name=deployment_name, namespace=namespace)
+        final_status = _deployment_snapshot(final_deployment)
+    except Exception as e:
+        final_status = {"error": f"Unable to read final deployment state: {e}"}
+
+    return {
+        "name": item["name"],
+        "engine": "custom",
+        "status": "completed",
+        "reason": None,
+        "startTime": start_time,
+        "endTime": datetime.now(timezone.utc).isoformat(),
+        "details": {
+            "target": target,
+            "parameters": params,
+            "originalReplicas": original_replicas,
+            "finalStatus": final_status,
         },
     }
 
@@ -558,3 +764,103 @@ def _source_region(manifest: Dict[str, Any], from_side: str) -> str:
 
 def _target_region(manifest: Dict[str, Any], from_side: str) -> str:
     return manifest["secondary_region"] if from_side == "primary" else manifest["primary_region"]
+
+
+def _validate_region_rds_service(svc: Dict[str, Any], index: int) -> None:
+    from_side = (svc.get("from") or "").strip().lower()
+    use_arc = svc.get("use_arc", True)
+    if from_side not in ("primary", "secondary"):
+        raise ValueError(f"services[{index}].from must be 'primary' or 'secondary'.")
+    if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
+        raise ValueError(f"services[{index}].tags is required for Aurora global database discovery.")
+    if not isinstance(use_arc, bool):
+        raise ValueError(f"services[{index}].use_arc must be true or false when provided.")
+
+
+def _validate_region_eks_service(svc: Dict[str, Any], index: int) -> None:
+    target = svc.get("target")
+    params = svc.get("parameters")
+    if not isinstance(target, dict):
+        raise ValueError(f"services[{index}].target must be an object for eks:scale-deployment.")
+    if not isinstance(params, dict):
+        raise ValueError(f"services[{index}].parameters must be an object for eks:scale-deployment.")
+
+    side = str(target.get("region") or "").strip().lower()
+    if side not in ("primary", "secondary"):
+        raise ValueError(f"services[{index}].target.region must be 'primary' or 'secondary'.")
+
+    for field in ("cluster_identifier", "namespace", "deployment_name"):
+        value = str(target.get(field) or "").strip()
+        if not value:
+            raise ValueError(f"services[{index}].target.{field} is required for eks:scale-deployment.")
+
+    try:
+        replicas = int(params.get("replicas"))
+    except Exception:
+        raise ValueError(f"services[{index}].parameters.replicas must be an integer.")
+    if replicas < 0:
+        raise ValueError(f"services[{index}].parameters.replicas must be non-negative.")
+
+
+def _optional_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "y", "on"):
+        return True
+    if text in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
+def _optional_int(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _is_region_deployment_ready(deployment, desired_replicas: int) -> bool:
+    status = deployment.status
+    metadata = deployment.metadata
+    spec = deployment.spec
+
+    observed_generation = int(status.observed_generation or 0)
+    generation = int(metadata.generation or 0)
+    spec_replicas = int(spec.replicas or 0)
+    replicas = int(status.replicas or 0)
+    updated_replicas = int(status.updated_replicas or 0)
+    ready_replicas = int(status.ready_replicas or 0)
+    available_replicas = int(status.available_replicas or 0)
+
+    if observed_generation < generation:
+        return False
+    if spec_replicas != desired_replicas:
+        return False
+    if desired_replicas == 0:
+        return replicas == 0 and ready_replicas == 0 and available_replicas == 0
+    return (
+        replicas == desired_replicas
+        and updated_replicas == desired_replicas
+        and ready_replicas == desired_replicas
+        and available_replicas == desired_replicas
+    )
+
+
+def _deployment_snapshot(deployment) -> Dict[str, Any]:
+    status = deployment.status
+    metadata = deployment.metadata
+    spec = deployment.spec
+    return {
+        "generation": int(metadata.generation or 0),
+        "observedGeneration": int(status.observed_generation or 0),
+        "specReplicas": int(spec.replicas or 0),
+        "replicas": int(status.replicas or 0),
+        "updatedReplicas": int(status.updated_replicas or 0),
+        "readyReplicas": int(status.ready_replicas or 0),
+        "availableReplicas": int(status.available_replicas or 0),
+    }

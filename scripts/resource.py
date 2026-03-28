@@ -423,26 +423,52 @@ def collect_impacted_resources(
         session = boto3.Session(region_name=region)
 
     rtype = (manifest.get("resilience_test_type") or "").strip().lower()
+    services = manifest.get("services") or []
+    if not isinstance(services, list):
+        return []
 
     if rtype == "region":
         out: List[Dict[str, str]] = []
-        for item in discover_rds_global_clusters(manifest=manifest, session=session):
-            if item.get("global_cluster_arn"):
-                out.append(
-                    {
-                        "service": str(item.get("service") or ""),
-                        "arn": str(item.get("global_cluster_arn") or ""),
-                        "selection_mode": str(item.get("selection_mode") or "ALL"),
-                    }
-                )
-            for cluster_arn in (item.get("member_cluster_arns") or {}).values():
-                out.append(
-                    {
-                        "service": str(item.get("service") or ""),
-                        "arn": str(cluster_arn or ""),
-                        "selection_mode": str(item.get("selection_mode") or "ALL"),
-                    }
-                )
+        primary_region = manifest.get("primary_region")
+        secondary_region = manifest.get("secondary_region")
+        for svc in services:
+            if not isinstance(svc, dict):
+                continue
+            name = normalize_service_name(svc.get("name"))
+            action = (svc.get("action") or "").strip().lower()
+            if name == "rds" and action in ("failover-global-db", "switchover-global-db"):
+                for item in discover_rds_global_clusters(manifest={"services": [svc], "primary_region": primary_region, "secondary_region": secondary_region, "resilience_test_type": "region"}, session=session):
+                    if item.get("global_cluster_arn"):
+                        out.append(
+                            {
+                                "service": str(item.get("service") or ""),
+                                "arn": str(item.get("global_cluster_arn") or ""),
+                                "selection_mode": str(item.get("selection_mode") or "ALL"),
+                            }
+                        )
+                    for cluster_arn in (item.get("member_cluster_arns") or {}).values():
+                        out.append(
+                            {
+                                "service": str(item.get("service") or ""),
+                                "arn": str(cluster_arn or ""),
+                                "selection_mode": str(item.get("selection_mode") or "ALL"),
+                            }
+                        )
+            elif name == "eks" and action == "scale-deployment":
+                target = svc.get("target") or {}
+                side = str(target.get("region") or "").strip().lower()
+                actual_region = primary_region if side == "primary" else secondary_region
+                cluster_identifier = str(target.get("cluster_identifier") or "").strip()
+                namespace = str(target.get("namespace") or "").strip()
+                deployment_name = str(target.get("deployment_name") or "").strip()
+                if cluster_identifier and namespace and deployment_name and actual_region:
+                    out.append(
+                        {
+                            "service": f"{name}:{action}",
+                            "arn": f"eks://{actual_region}/{cluster_identifier}/{namespace}/deployment/{deployment_name}",
+                            "selection_mode": "CUSTOM",
+                        }
+                    )
         return out
 
     manifest_region = region or manifest.get("region")
@@ -450,10 +476,6 @@ def collect_impacted_resources(
         raise ValueError("manifest.yml must include top-level region")
 
     zone = manifest.get("zone") if rtype == "site" else None
-
-    services = manifest.get("services") or []
-    if not isinstance(services, list):
-        return []
 
     out: List[Dict[str, str]] = []
 
