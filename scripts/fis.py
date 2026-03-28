@@ -82,7 +82,7 @@ def wait_for_completion(
             return exp
         if time.time() - start > timeout_seconds:
             raise TimeoutError(f"Experiment {experiment_id} timed out after {timeout_seconds}s (last={status}).")
-        print(f"[INFO] Experiment {experiment_id} status={status} elapsed={int(time.time()-start)}s")
+        print(f"[INFO] FIS is running: experimentId={experiment_id} status={status} elapsed={int(time.time()-start)}s")
         time.sleep(poll_seconds)
 
 
@@ -428,6 +428,7 @@ def main() -> int:
             print(f"[INFO] start_before={start_before_min} minutes: waiting before starting experiment...")
             time.sleep(start_before_min * 60)
 
+        print("[INFO] FIS is running...")
         exp_id = start_experiment(fis_client, template_id)
         print(f"[OK] Started experimentId: {exp_id}")
 

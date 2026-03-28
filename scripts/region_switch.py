@@ -303,6 +303,7 @@ def _execute_arc_item(
     client = session.client("arc-region-switch", region_name=item["planControlRegion"])
     start_time = datetime.now(timezone.utc).isoformat()
 
+    print(f"[INFO] ARC is running: {item['service']}")
     plan = client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
@@ -407,7 +408,7 @@ def _wait_for_arc_execution(
                 f"Region switch execution {execution_id} timed out after {timeout_seconds}s (last={status})."
             )
         print(
-            f"[INFO] Region switch execution {execution_id} status={status} "
+            f"[INFO] ARC is running: executionId={execution_id} status={status} "
             f"elapsed={int(time.time() - start)}s"
         )
         time.sleep(poll_seconds)

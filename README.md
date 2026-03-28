@@ -904,6 +904,14 @@ Dry run writes payload and discovery artifacts but does not create or execute th
 python fis.py --manifest ..\manifests\geo-1.yml --arc-role-arn <arc-role-arn> --dry-run
 ```
 
+### Runtime Logging
+
+During execution, the framework now prints lightweight progress logs:
+
+- custom actions log when each action starts, finishes, or is skipped
+- FIS runs log generic `FIS is running` progress messages while the experiment is active
+- ARC runs log generic `ARC is running` progress messages while the region action is active
+
 ## Extension Guidance
 
 ### When Adding a New FIS Action
