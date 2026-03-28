@@ -7,7 +7,7 @@ services:
     hosted_zone: logicgate.biz
     record_name: dev.logicgate.biz
     record_type: A
-  value: 13.228.75.239
+  value: 1.1.1.1
 
 - name: dns
   action: set-weight
