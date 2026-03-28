@@ -11,7 +11,7 @@ services:
     namespace: default
     deployment_name: my-service
   parameters:
-    replicas: 0
+    replicas: 2
     wait_for_ready: true
     timeout_seconds: 600
 
@@ -23,6 +23,7 @@ services:
     namespace: default
     deployment_name: my-service
   parameters:
-    replicas: 3
+    replicas: 0
     wait_for_ready: true
     timeout_seconds: 600
+  start_after: eks:scale-deployment#1
