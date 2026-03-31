@@ -1,3 +1,4 @@
+import concurrent.futures
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
@@ -137,6 +138,7 @@ def build_execution_plan(
 
     plan_name = f"region-run-{utc_ts()}".lower()
     items: List[Dict[str, Any]] = []
+    services = [svc for svc in (manifest.get("services") or []) if isinstance(svc, dict)]
     for idx, target in enumerate(resolved_targets, start=1):
         if str(target.get("service") or "").strip().lower() == "eks:scale-deployment":
             item = _build_region_eks_execution_item(target, idx)
@@ -151,6 +153,10 @@ def build_execution_plan(
             else:
                 item = _build_non_arc_execution_item(manifest, target, idx)
         items.append(item)
+
+    start_after_map = _resolve_region_start_after(services, [str(item["name"]) for item in items])
+    for index, item in enumerate(items, start=1):
+        item["startAfter"] = start_after_map.get(index) or []
 
     if not items:
         raise ValueError("No region execution items were resolved from the manifest.")
@@ -169,44 +175,121 @@ def execute_region_plan(
     poll_seconds: int = 10,
     timeout_seconds: int = 3600,
 ) -> Dict[str, Any]:
-    item_summaries: List[Dict[str, Any]] = []
+    items = list(execution_plan.get("items") or [])
+    items_by_name = {str(item["name"]): item for item in items}
+    pending = {str(item["name"]) for item in items}
+    running: Dict[concurrent.futures.Future, str] = {}
+    results: Dict[str, Dict[str, Any]] = {}
 
-    for item in execution_plan["items"]:
+    def _execute(item: Dict[str, Any]) -> Dict[str, Any]:
         if item["engine"] == "arc":
-            item_summary = _execute_arc_item(
+            return _execute_arc_item(
                 session=session,
                 item=item,
                 poll_seconds=poll_seconds,
                 timeout_seconds=timeout_seconds,
             )
-        elif item["engine"] == "sdk":
-            item_summary = _execute_sdk_item(
+        if item["engine"] == "sdk":
+            return _execute_sdk_item(
                 session=session,
                 item=item,
                 poll_seconds=poll_seconds,
                 timeout_seconds=timeout_seconds,
             )
-        elif item["engine"] == "custom":
+        if item["engine"] == "custom":
             if str(item.get("service") or "").strip().lower().startswith("eks:"):
-                item_summary = _execute_region_eks_item(
+                return _execute_region_eks_item(
                     session=session,
                     item=item,
                     poll_seconds=poll_seconds,
                     timeout_seconds=timeout_seconds,
                 )
-            elif str(item.get("service") or "").strip().lower().startswith("dns:"):
-                item_summary = _execute_region_dns_item(
+            if str(item.get("service") or "").strip().lower().startswith("dns:"):
+                return _execute_region_dns_item(
                     session=session,
                     item=item,
                     poll_seconds=poll_seconds,
                     timeout_seconds=timeout_seconds,
                 )
-            else:
-                raise ValueError(f"Unsupported custom region execution service: {item.get('service')}")
-        else:
-            raise ValueError(f"Unsupported region execution engine: {item['engine']}")
+            raise ValueError(f"Unsupported custom region execution service: {item.get('service')}")
+        raise ValueError(f"Unsupported region execution engine: {item['engine']}")
 
-        item_summaries.append(item_summary)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(items))) as executor:
+        while pending or running:
+            made_progress = False
+
+            for item_name in list(pending):
+                item = items_by_name[item_name]
+                deps = list(item.get("startAfter") or [])
+                if not all(dep in results for dep in deps):
+                    continue
+
+                failed_deps = [dep for dep in deps if results[dep].get("status") != "completed"]
+                if failed_deps:
+                    print(
+                        f"[INFO] Skipping region action {item.get('service')} "
+                        f"because dependency action(s) did not complete successfully: {', '.join(failed_deps)}"
+                    )
+                    results[item_name] = {
+                        "name": item_name,
+                        "engine": item.get("engine"),
+                        "status": "skipped",
+                        "reason": f"Skipped because dependency action(s) did not complete successfully: {', '.join(failed_deps)}",
+                        "startTime": None,
+                        "endTime": None,
+                        "details": {
+                            "target": item.get("target"),
+                            "parameters": item.get("parameters"),
+                            "startAfter": deps,
+                        },
+                    }
+                    pending.remove(item_name)
+                    made_progress = True
+                    continue
+
+                print(f"[INFO] Starting region action: {item.get('service')} ({item_name})")
+                running[executor.submit(_execute, item)] = item_name
+                pending.remove(item_name)
+                made_progress = True
+
+            if running:
+                done, _ = concurrent.futures.wait(
+                    running.keys(),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    item_name = running.pop(future)
+                    try:
+                        results[item_name] = future.result()
+                    except Exception as e:
+                        results[item_name] = {
+                            "name": item_name,
+                            "engine": items_by_name[item_name].get("engine"),
+                            "status": "failed",
+                            "reason": f"Unhandled region action error: {e}",
+                            "startTime": None,
+                            "endTime": None,
+                            "details": {
+                                "target": items_by_name[item_name].get("target"),
+                                "parameters": items_by_name[item_name].get("parameters"),
+                                "startAfter": items_by_name[item_name].get("startAfter") or [],
+                            },
+                        }
+                    result = results[item_name]
+                    print(
+                        f"[INFO] Finished region action: {items_by_name[item_name].get('service')} "
+                        f"({item_name}) status={result.get('status')}"
+                    )
+                    made_progress = True
+
+            if not made_progress and pending:
+                blocked = sorted(pending)
+                raise ValueError(
+                    "Region execution plan contains unresolved or cyclic start_after dependencies: "
+                    + ", ".join(blocked)
+                )
+
+    item_summaries: List[Dict[str, Any]] = [results[str(item["name"])] for item in items]
 
     overall_status = "completed"
     if any(s["status"] not in ("completed", "completedWithExceptions") for s in item_summaries):
@@ -240,6 +323,75 @@ def execute_region_plan(
         }
 
     return summary
+
+
+def _parse_start_after_refs(value: Any, field_name: str) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        refs = [value]
+    elif isinstance(value, list):
+        refs = value
+    else:
+        raise ValueError(f"{field_name} must be a string or list of strings if provided.")
+
+    out: List[str] = []
+    for raw in refs:
+        text = str(raw or "").strip().lower()
+        if not text:
+            continue
+        out.append(text)
+    return out
+
+
+def _build_service_reference_map(services: List[Dict[str, Any]], item_names: List[str]) -> Dict[str, Tuple[int, str]]:
+    totals: Dict[str, int] = {}
+    normalized: List[Tuple[str, str]] = []
+    for svc in services:
+        service_name = str(svc.get("name") or "").strip().lower()
+        action = str(svc.get("action") or "").strip().lower()
+        key = f"{service_name}:{action}"
+        normalized.append((service_name, action))
+        totals[key] = totals.get(key, 0) + 1
+
+    refs: Dict[str, Tuple[int, str]] = {}
+    occurrences: Dict[str, int] = {}
+    for index, ((service_name, action), item_name) in enumerate(zip(normalized, item_names), start=1):
+        key = f"{service_name}:{action}"
+        occurrences[key] = occurrences.get(key, 0) + 1
+        ordinal = occurrences[key]
+        refs[f"{key}#{ordinal}"] = (index, item_name)
+        if totals[key] == 1:
+            refs[key] = (index, item_name)
+    return refs
+
+
+def _resolve_region_start_after(services: List[Dict[str, Any]], item_names: List[str]) -> Dict[int, List[str]]:
+    ref_map = _build_service_reference_map(services, item_names)
+    resolved: Dict[int, List[str]] = {}
+    for index, svc in enumerate(services, start=1):
+        dependencies: List[str] = []
+        seen = set()
+        refs = _parse_start_after_refs(svc.get("start_after"), f"services[{index - 1}].start_after")
+        for ref in refs:
+            target = ref_map.get(ref)
+            if target is None:
+                raise ValueError(
+                    f"services[{index - 1}].start_after references unknown action '{ref}'. "
+                    "Use '<service>:<action>' for unique actions or '<service>:<action>#<n>' when duplicates exist."
+                )
+
+            target_index, target_item_name = target
+            if target_index >= index:
+                raise ValueError(
+                    f"services[{index - 1}].start_after reference '{ref}' must point to an earlier service action."
+                )
+
+            if target_item_name not in seen:
+                dependencies.append(target_item_name)
+                seen.add(target_item_name)
+        resolved[index] = dependencies
+    return resolved
 
 
 def _build_arc_execution_item(

@@ -431,7 +431,8 @@ The current region path in `scripts/region_switch.py` does the following:
    - ARC when `use_arc = true`
    - non-ARC custom execution when `use_arc = false`
    - custom execution for supported region actions such as EKS deployment scaling and Route 53 DNS updates
-5. runs the selected engine and writes a unified summary for reporting
+5. applies `service.start_after` dependencies
+6. runs region actions in parallel by default when `service.start_after` is omitted, and writes a unified summary for reporting
 
 ### ARC Path
 
