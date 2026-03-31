@@ -6,7 +6,7 @@ It currently supports three execution models:
 
 1. AWS Fault Injection Service (FIS) for component and site resilience tests
 2. AWS ARC Region switch for regional Aurora Global Database failover and switchover tests
-3. Custom component actions for component/site behaviors that are not available as native FIS actions
+3. Custom actions for behaviors that are not available as native FIS actions
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 
@@ -25,7 +25,7 @@ The current architecture deliberately separates:
 
 - FIS-based infrastructure chaos actions
 - ARC-based regional switch actions
-- custom component actions
+- custom actions
 - observability and reporting
 - resource discovery
 
@@ -60,9 +60,11 @@ Execution path:
 
 1. `scripts/fis.py` detects `region` mode
 2. `scripts/region_switch.py` validates the manifest
-3. `scripts/resource.py` discovers the Aurora Global Database and member cluster ARNs from tags
-4. `scripts/region_switch.py` builds an ARC Region switch plan payload
-5. ARC plan is created and executed
+3. `scripts/resource.py` discovers the impacted resources for reporting
+4. `scripts/region_switch.py` builds a region execution plan
+5. The selected region engine runs:
+   - ARC for Aurora Global Database actions when `use_arc: true`
+   - custom boto3/Kubernetes/Route 53 execution for supported non-ARC region actions
 6. Health-check observability runs around the switch window
 7. Results are written to disk
 8. `scripts/chart.py` generates an HTML report
@@ -189,8 +191,8 @@ Responsibilities:
     <tr><th colspan="3" align="left">Common</th></tr>
     <tr><td><code>common:wait</code></td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td></tr>
     <tr><th colspan="3" align="left">DNS</th></tr>
-    <tr><td><code>dns:set-value</code></td><td>Update the value of a simple Route 53 DNS record.</td><td></td></tr>
-    <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier.</td><td></td></tr>
+    <tr><td><code>dns:set-value</code></td><td>Update the value of a simple Route 53 DNS record for component or region workflows.</td><td></td></tr>
+    <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
@@ -376,7 +378,7 @@ Site scoping is applied to targets where supported. The code already contains sp
 
 ### Region Example
 
-See `manifests/geo-rds.yml` and `manifests/geo-eks.yml`.
+See `manifests/geo-rds.yml`, `manifests/geo-eks.yml`, and `manifests/geo-dns.yml`.
 
 Example shape:
 
@@ -408,6 +410,7 @@ Notes on region manifests:
 - `use_arc` only applies to `resilience_test_type: region`
 - if `use_arc` is omitted, the current default behavior is `true`
 - for region EKS scaling, use `service.target.region: primary|secondary` plus an explicit `cluster_identifier`
+- Route 53 DNS actions can also be included in region manifests; they use the same target and value fields as the component DNS manifests
 
 ## ARC Region Switch Design
 
@@ -422,16 +425,13 @@ Aurora Global Database failover and switchover are orchestrated using ARC Region
 The current region path in `scripts/region_switch.py` does the following:
 
 1. validates the region manifest
-2. discovers Aurora Global Database targets from tags
-3. resolves:
-   - one global cluster identifier
-   - one member cluster ARN in `primary_region`
-   - one member cluster ARN in `secondary_region`
-4. builds a region execution plan
-5. selects the engine per service block:
+2. resolves any action-specific targets needed by the selected services
+3. builds a region execution plan
+4. selects the engine per service block:
    - ARC when `use_arc = true`
    - non-ARC custom execution when `use_arc = false`
-6. runs the selected engine and writes a unified summary for reporting
+   - custom execution for supported region actions such as EKS deployment scaling and Route 53 DNS updates
+5. runs the selected engine and writes a unified summary for reporting
 
 ### ARC Path
 
@@ -454,6 +454,19 @@ When `use_arc = false`, the code currently uses direct boto3 RDS APIs:
 - `rds.switchover_global_cluster()` for `switchover-global-db`
 
 This exists because native FIS support for Aurora Global Database failover and switchover is not assumed in this codebase. The framework is designed so a future region action can choose ARC or a different custom implementation without changing the manifest contract.
+
+### Region DNS Path
+
+For `dns:set-value` and `dns:set-weight` under `resilience_test_type: region`, the framework reuses the existing Route 53 custom action implementation from `scripts/component_actions/dns.py`.
+
+Current behavior:
+
+- Route 53 record lookup is performed from `service.target.hosted_zone`, `service.target.record_name`, and `service.target.record_type`
+- `dns:set-value` updates one simple, non-alias record
+- `dns:set-weight` updates any number of weighted records by `SetIdentifier` using `service.value`
+- Route 53 changes are applied with `UPSERT` and polled until `INSYNC`
+
+This keeps DNS region tests policy-aware at the record level without introducing a second DNS executor.
 
 ### Current Discovery Rules for Aurora Global Database
 

@@ -1,0 +1,20 @@
+resilience_test_type: region
+primary_region: ap-southeast-1
+secondary_region: ap-southeast-2
+
+services:
+- name: dns
+  action: set-value
+  target:
+    hosted_zone: logicgate.biz
+    record_name: dev.logicgate.biz
+    record_type: A
+  value: 3.3.3.3
+
+- name: dns
+  action: set-weight
+  target:
+    hosted_zone: logicgate.biz
+    record_name: weighted.logicgate.biz
+    record_type: A
+  value: primary=10,secondary=90

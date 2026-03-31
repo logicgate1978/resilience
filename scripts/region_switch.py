@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from kubernetes.client.exceptions import ApiException
 
+from component_actions.dns import DNSAction
 from component_actions.k8s_auth import create_apps_v1_api
 from utility import utc_ts
 
@@ -67,6 +68,9 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
         if name == "eks" and action == "scale-deployment":
             _validate_region_eks_service(svc, i)
             continue
+        if name == "dns" and action in ("set-value", "set-weight"):
+            _validate_region_dns_service(svc, i)
+            continue
         raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
 
 
@@ -75,10 +79,11 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
     resolved: List[Dict[str, Any]] = []
     rds_targets = discover_rds_global_clusters(manifest=manifest, session=session)
     rds_iter = iter(rds_targets)
+    dns_handler = DNSAction()
     primary_region = manifest["primary_region"]
     secondary_region = manifest["secondary_region"]
 
-    for svc in manifest.get("services") or []:
+    for index, svc in enumerate(manifest.get("services") or [], start=1):
         if not isinstance(svc, dict):
             continue
         name = (svc.get("name") or "").strip().lower()
@@ -104,6 +109,22 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
                     "timeout_seconds": _optional_int(params.get("timeout_seconds"), 600),
                 }
             )
+        elif name == "dns" and action in ("set-value", "set-weight"):
+            plan_item = dns_handler.build_plan_item(
+                manifest=manifest,
+                svc=svc,
+                session=session,
+                region=primary_region,
+                index=index,
+                default_timeout_seconds=600,
+            )
+            resolved.append(
+                {
+                    "service": f"dns:{action}",
+                    "action": action,
+                    "plan_item": plan_item,
+                }
+            )
     return resolved
 
 
@@ -119,6 +140,8 @@ def build_execution_plan(
     for idx, target in enumerate(resolved_targets, start=1):
         if str(target.get("service") or "").strip().lower() == "eks:scale-deployment":
             item = _build_region_eks_execution_item(target, idx)
+        elif str(target.get("service") or "").strip().lower().startswith("dns:"):
+            item = _build_region_dns_execution_item(target, idx)
         else:
             use_arc = bool(target.get("use_arc", True))
             if use_arc:
@@ -164,12 +187,22 @@ def execute_region_plan(
                 timeout_seconds=timeout_seconds,
             )
         elif item["engine"] == "custom":
-            item_summary = _execute_region_eks_item(
-                session=session,
-                item=item,
-                poll_seconds=poll_seconds,
-                timeout_seconds=timeout_seconds,
-            )
+            if str(item.get("service") or "").strip().lower().startswith("eks:"):
+                item_summary = _execute_region_eks_item(
+                    session=session,
+                    item=item,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=timeout_seconds,
+                )
+            elif str(item.get("service") or "").strip().lower().startswith("dns:"):
+                item_summary = _execute_region_dns_item(
+                    session=session,
+                    item=item,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=timeout_seconds,
+                )
+            else:
+                raise ValueError(f"Unsupported custom region execution service: {item.get('service')}")
         else:
             raise ValueError(f"Unsupported region execution engine: {item['engine']}")
 
@@ -357,6 +390,19 @@ def _build_region_eks_execution_item(
             "timeoutSeconds": target["timeout_seconds"],
         },
     }
+
+
+def _build_region_dns_execution_item(
+    target: Dict[str, Any],
+    index: int,
+) -> Dict[str, Any]:
+    _ = index
+    plan_item = dict(target["plan_item"])
+    params = dict(plan_item.get("parameters") or {})
+    params.pop("timeoutSeconds", None)
+    plan_item["parameters"] = params
+    plan_item["region"] = None
+    return plan_item
 
 
 def _execute_arc_item(
@@ -589,6 +635,21 @@ def _execute_region_eks_item(
     }
 
 
+def _execute_region_dns_item(
+    session,
+    item: Dict[str, Any],
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    print(f"[INFO] Starting region custom action {item['service']}")
+    return DNSAction().execute_item(
+        session=session,
+        item=item,
+        poll_seconds=poll_seconds,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def _wait_for_arc_execution(
     client,
     plan_arn: str,
@@ -800,6 +861,21 @@ def _validate_region_eks_service(svc: Dict[str, Any], index: int) -> None:
         raise ValueError(f"services[{index}].parameters.replicas must be an integer.")
     if replicas < 0:
         raise ValueError(f"services[{index}].parameters.replicas must be non-negative.")
+
+
+def _validate_region_dns_service(svc: Dict[str, Any], index: int) -> None:
+    target = svc.get("target")
+    if not isinstance(target, dict):
+        raise ValueError(f"services[{index}].target must be an object for dns actions.")
+
+    for field in ("hosted_zone", "record_name", "record_type"):
+        value = str(target.get(field) or "").strip()
+        if not value:
+            raise ValueError(f"services[{index}].target.{field} is required for dns actions.")
+
+    value = str(svc.get("value") or "").strip()
+    if not value:
+        raise ValueError(f"services[{index}].value is required for dns actions.")
 
 
 def _optional_bool(value: Any, default: bool) -> bool:

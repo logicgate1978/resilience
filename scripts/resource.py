@@ -2,6 +2,7 @@
 import boto3
 from typing import Any, Dict, List, Optional
 
+from dns_utils import normalize_record_name, parse_weight_assignments
 from utility import get_account_id, normalize_service_name, parse_tags, resolve_iam_role_arns_from_names
 
 
@@ -23,6 +24,11 @@ def _selection_mode_label(instance_count: Optional[Any]) -> str:
 
 def _service_label(name: str, action: str) -> str:
     return f"{name}:{action}"
+
+
+def _dns_record_label(hosted_zone: str, record_name: str, record_type: str, set_identifier: str = "") -> str:
+    suffix = f"#{set_identifier}" if set_identifier else ""
+    return f"route53://{hosted_zone}/{record_name}/{record_type}{suffix}"
 
 
 def _apply_count_selection(arns: List[str], instance_count: Optional[Any]) -> List[str]:
@@ -469,6 +475,34 @@ def collect_impacted_resources(
                             "selection_mode": "CUSTOM",
                         }
                     )
+            elif name == "dns" and action in ("set-value", "set-weight"):
+                target = svc.get("target") or {}
+                hosted_zone = str(target.get("hosted_zone") or "").strip()
+                record_name = normalize_record_name(str(target.get("record_name") or "").strip())
+                record_type = str(target.get("record_type") or "").strip().upper()
+                if not hosted_zone or not record_name or not record_type:
+                    continue
+                if action == "set-value":
+                    out.append(
+                        {
+                            "service": f"{name}:{action}",
+                            "arn": _dns_record_label(hosted_zone, record_name, record_type),
+                            "selection_mode": "CUSTOM",
+                        }
+                    )
+                else:
+                    try:
+                        assignments = parse_weight_assignments(svc.get("value"))
+                    except Exception:
+                        assignments = {}
+                    for set_identifier in assignments:
+                        out.append(
+                            {
+                                "service": f"{name}:{action}",
+                                "arn": _dns_record_label(hosted_zone, record_name, record_type, set_identifier),
+                                "selection_mode": "CUSTOM",
+                            }
+                        )
         return out
 
     manifest_region = region or manifest.get("region")
