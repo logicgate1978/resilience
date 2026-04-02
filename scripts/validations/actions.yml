@@ -16,6 +16,12 @@ actions:
   - action: ec2:terminate
     validations:
       - verify_resource_existence
+  - action: ec2:reboot
+    validations:
+      - verify_resource_existence
+  - action: ec2:stop
+    validations:
+      - verify_resource_existence
   - action: rds:reboot
     validations:
       - verify_resource_existence

@@ -43,7 +43,7 @@ Execution path:
 1. `scripts/fis.py` loads the manifest
 2. The action is routed to either:
    - `scripts/template_generator/` for native FIS actions
-   - `scripts/component_actions/` for custom-only component actions
+   - `scripts/component_actions/` for custom actions and supported `use_fis: false` fallbacks
 3. Impacted resources are written
 4. `scripts/observability.py` starts collectors
 5. The selected execution engine runs
@@ -195,9 +195,9 @@ Responsibilities:
     <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
-    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration.</td><td><code>aws:ec2:stop-instances</code></td></tr>
-    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
-    <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
+    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. In the boto3 path, <code>service.duration</code> is required and controls when the instances are started again.</td><td><code>aws:ec2:stop-instances</code></td></tr>
+    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is not used in the boto3 path.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
+    <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
     <tr><th colspan="3" align="left">RDS</th></tr>
     <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
     <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
@@ -248,7 +248,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
     <tr><td><code>service.value</code></td><td>Yes for some actions</td><td><code>dns:set-value</code>, <code>dns:set-weight</code></td><td>Action-specific value payload. For <code>dns:set-value</code>, this is the target record value. For <code>dns:set-weight</code>, this is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
-    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>.</td></tr>
+    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>. For <code>ec2:stop</code> with <code>service.use_fis: false</code>, it controls how long instances remain stopped before the framework starts them again.</td></tr>
     <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
     <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
     <tr><td><code>service.iam_role_arns</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Explicit IAM role ARNs to target instead of resolving <code>iam_roles</code>.</td></tr>
@@ -257,7 +257,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
     <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
-    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code></td><td>Chooses the execution engine for <code>common:wait</code>. Defaults to <code>true</code>. When set to <code>false</code>, the framework implements the wait directly in Python so custom-only manifests can still use it.</td></tr>
+    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
@@ -542,11 +542,14 @@ This pattern is useful for future service actions that require structured target
 
 ## Custom Component Action Design
 
-Custom component actions are used when the framework needs to execute a component/site action that is not available as a native FIS action.
+Custom component actions are used when the framework needs to execute a component/site action that is not available as a native FIS action, or when a supported action explicitly opts out of FIS with `service.use_fis: false`.
 
 Current implementation:
 
 - `common:wait` when `service.use_fis = false`
+- `ec2:stop` when `service.use_fis = false`
+- `ec2:reboot` when `service.use_fis = false`
+- `ec2:terminate` when `service.use_fis = false`
 - `dns:set-value`
 - `dns:set-weight`
 - `asg:scale`
@@ -560,6 +563,27 @@ Design rules:
    - the FIS template path
    - the custom component-action path
 4. Mixing native FIS actions and custom component actions in the same manifest is intentionally not supported yet.
+
+### Current `ec2` boto3 Fallback Behavior
+
+When `service.use_fis = false` for `ec2:stop`, `ec2:reboot`, or `ec2:terminate`, the framework uses the EC2 API directly instead of creating a FIS experiment.
+
+Current behavior:
+
+- `ec2:stop`
+  - stops the selected instances
+  - waits until they are fully stopped
+  - sleeps for `service.duration`
+  - starts the instances again
+  - waits until they are running
+- `ec2:reboot`
+  - reboots the selected instances
+  - waits until EC2 instance status checks return `ok`
+  - does not use `service.duration`
+- `ec2:terminate`
+  - terminates the selected instances
+  - waits until they are terminated
+  - does not restart them
 
 ### Current `asg:scale` Behavior
 

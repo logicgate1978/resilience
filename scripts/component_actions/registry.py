@@ -118,6 +118,21 @@ def _split_manifest_services(manifest: Dict[str, Any]) -> Tuple[List[Dict[str, A
         service_name = normalize_service_name(svc.get("name"))
         action = str(svc.get("action") or "").strip().lower()
         handler = _find_action_handler(service_name, action)
+        if service_name == "ec2" and action in ("stop", "reboot", "terminate"):
+            use_fis_value = svc.get("use_fis", True)
+            if isinstance(use_fis_value, bool):
+                use_fis = use_fis_value
+            else:
+                use_fis = str(use_fis_value).strip().lower() not in ("0", "false", "no", "n", "off")
+            if use_fis:
+                fis_services.append(svc)
+            elif handler is None:
+                raise ValueError(
+                    f"ec2:{action} with use_fis=false requires a custom EC2 handler, but none is registered."
+                )
+            else:
+                custom_services.append(svc)
+            continue
         if service_name == "common" and action == "wait":
             use_fis_value = svc.get("use_fis", True)
             if isinstance(use_fis_value, bool):
