@@ -5,3 +5,4 @@ services:
   action: stop
   tags: Name=test
   duration: PT5M
+  use_fis: false
