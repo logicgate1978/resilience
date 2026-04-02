@@ -199,8 +199,8 @@ Responsibilities:
     <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is not used in the boto3 path.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
     <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
     <tr><th colspan="3" align="left">RDS</th></tr>
-    <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
-    <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
+    <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
+    <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
     <tr><td><code>rds:failover-global-db</code></td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
     <tr><td><code>rds:switchover-global-db</code></td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
     <tr><th colspan="3" align="left">ASG</th></tr>
@@ -257,7 +257,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
     <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
-    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
+    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
@@ -550,6 +550,8 @@ Current implementation:
 - `ec2:stop` when `service.use_fis = false`
 - `ec2:reboot` when `service.use_fis = false`
 - `ec2:terminate` when `service.use_fis = false`
+- `rds:reboot` when `service.use_fis = false`
+- `rds:failover` when `service.use_fis = false`
 - `dns:set-value`
 - `dns:set-weight`
 - `asg:scale`
@@ -584,6 +586,20 @@ Current behavior:
   - terminates the selected instances
   - waits until they are terminated
   - does not restart them
+
+### Current `rds` boto3 Fallback Behavior
+
+When `service.use_fis = false` for `rds:reboot` or `rds:failover`, the framework uses the RDS API directly instead of creating a FIS experiment.
+
+Current behavior:
+
+- `rds:reboot`
+  - reboots the selected DB instances with `RebootDBInstance`
+  - waits until each DB instance returns to `available`
+- `rds:failover`
+  - forces failover on the selected DB clusters with `FailoverDBCluster`
+  - waits until each cluster returns to `available`
+  - when the original writer can be determined, waits until the cluster writer changes
 
 ### Current `asg:scale` Behavior
 
