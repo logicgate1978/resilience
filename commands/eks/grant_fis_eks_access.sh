@@ -5,8 +5,8 @@ set -euo pipefail
 DEFAULT_REGION="ap-southeast-1"
 DEFAULT_USERNAME="fis-experiment"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-ENV_FILE="${REPO_ROOT}/.env"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ENV_FILE="${REPO_ROOT}/scripts/.env"
 STATE_FILE="${SCRIPT_DIR}/.state/current_eks_cluster.txt"
 LEGACY_STATE_FILE="${SCRIPT_DIR}/.state/last_eks_cluster.env"
 EKS_ACCESS_POLICY_ARN="arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -29,7 +29,7 @@ Defaults:
   username: fis-experiment
 
 Behavior:
-  - Reads FIS_ROLE_ARN from repo-root .env if --fis-role-arn is omitted
+  - Reads FIS_ROLE_ARN from scripts/.env if --fis-role-arn is omitted
   - Reads the current cluster from commands/.state/current_eks_cluster.txt if --name is omitted
   - Attaches AWSFaultInjectionSimulatorEKSAccess to the IAM role
   - Creates or verifies an EKS access entry for the role using username fis-experiment
@@ -149,7 +149,7 @@ if [[ -z "${CLUSTER_NAME}" ]]; then
 fi
 
 if [[ -z "${FIS_ROLE_ARN}" ]]; then
-  echo "ERROR: FIS_ROLE_ARN is required. Add it to .env or pass --fis-role-arn." >&2
+  echo "ERROR: FIS_ROLE_ARN is required. Add it to scripts/.env or pass --fis-role-arn." >&2
   exit 1
 fi
 

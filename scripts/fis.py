@@ -31,7 +31,7 @@ from chart import generate_report  # NEW
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-ENV_PATH = os.path.join(REPO_ROOT, ".env")
+ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
 
 
 def _env_value(env: Dict[str, str], key: str, fallback: str) -> str:

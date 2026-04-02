@@ -863,7 +863,7 @@ A typical run creates some or all of:
 
 ### Default Arguments from `.env`
 
-The repository root can contain a `.env` file with default values for `scripts/fis.py`.
+The canonical env file is `scripts/.env`, which contains default values for `scripts/fis.py`.
 
 Current supported keys:
 
