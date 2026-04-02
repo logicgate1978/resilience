@@ -6,11 +6,3 @@ services:
   tags: environment=development,project=clouddash
   from: primary
   use_arc: false
-observability:
-  start_before: 2
-  stop_after: 2
-  health_check:
-    endpoint: http://resilience-test-lb-1981158977.ap-southeast-1.elb.amazonaws.com
-    http_method: get
-    healthy_status_code: 200
-    interval: 10

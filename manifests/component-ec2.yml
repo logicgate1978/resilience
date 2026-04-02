@@ -14,5 +14,11 @@ services:
   start_after: common:wait
 
 observability:
+  start_before: 2
+  stop_after: 2
   health_check:
-    endpoint: resilience-asg-web-alb-1560612262.ap-southeast-1.elb.amazonaws.com
+    endpoint: http://resilience-test-lb-1981158977.ap-southeast-1.elb.amazonaws.com
+    http_method: get
+    healthy_status_code: 200
+    interval: 10
+
