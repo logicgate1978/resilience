@@ -6,7 +6,7 @@ services:
 - name: eks
   action: scale-deployment
   target:
-    region: primary
+    region: ap-southeast-1
     cluster_identifier: resilience-eks-20260328122508
     namespace: default
     deployment_name: my-service
@@ -18,7 +18,7 @@ services:
 - name: eks
   action: scale-deployment
   target:
-    region: secondary
+    region: ap-southeast-2
     cluster_identifier: resilience-eks-20260328130249
     namespace: default
     deployment_name: my-service

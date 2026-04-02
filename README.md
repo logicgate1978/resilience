@@ -266,7 +266,7 @@ Responsibilities:
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
     <tr><th colspan="4" align="left">Service Target Fields</th></tr>
     <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>EKS cluster name used by the FIS pod target.</td></tr>
-    <tr><td><code>service.target.region</code></td><td>Yes for region EKS scaling</td><td>Region <code>eks:scale-deployment</code></td><td>Selects whether the target EKS Deployment belongs to the manifest <code>primary</code> or <code>secondary</code> Region.</td></tr>
+    <tr><td><code>service.target.region</code></td><td>Yes for region EKS scaling</td><td>Region <code>eks:scale-deployment</code></td><td>The actual AWS Region of the target EKS cluster, for example <code>ap-southeast-1</code> or <code>ap-southeast-2</code>. The legacy aliases <code>primary</code> and <code>secondary</code> are still accepted for backward compatibility.</td></tr>
     <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
     <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
     <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
@@ -412,7 +412,7 @@ Notes on region manifests:
 - tags are used for discovery; the user does not need to provide the Aurora Global Database ARN or member cluster ARNs
 - `use_arc` only applies to `resilience_test_type: region`
 - if `use_arc` is omitted, the current default behavior is `true`
-- for region EKS scaling, use `service.target.region: primary|secondary` plus an explicit `cluster_identifier`
+- for region EKS scaling, use the actual AWS Region in `service.target.region`, plus an explicit `cluster_identifier`
 - Route 53 DNS actions can also be included in region manifests; they use the same target and value fields as the component DNS manifests
 
 ## ARC Region Switch Design

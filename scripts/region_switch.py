@@ -61,6 +61,8 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
     for i, svc in enumerate(services):
         if not isinstance(svc, dict):
             raise ValueError(f"services[{i}] must be an object.")
+        svc["__primary_region__"] = primary_region
+        svc["__secondary_region__"] = secondary_region
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
         if name == "rds" and action in REGION_ACTION_CONFIG:
@@ -94,14 +96,16 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
         elif name == "eks" and action == "scale-deployment":
             target = svc["target"]
             params = svc["parameters"]
-            side = str(target.get("region") or "").strip().lower()
-            actual_region = primary_region if side == "primary" else secondary_region
+            actual_region = _resolve_region_eks_target_region(
+                str(target.get("region") or "").strip(),
+                primary_region=primary_region,
+                secondary_region=secondary_region,
+            )
             resolved.append(
                 {
                     "service": "eks:scale-deployment",
                     "action": "scale-deployment",
                     "execution_region": actual_region,
-                    "region_side": side,
                     "cluster_identifier": str(target.get("cluster_identifier") or "").strip(),
                     "namespace": str(target.get("namespace") or "").strip(),
                     "deployment_name": str(target.get("deployment_name") or "").strip(),
@@ -531,7 +535,6 @@ def _build_region_eks_execution_item(
         "action": "scale-deployment",
         "region": target["execution_region"],
         "target": {
-            "regionSide": target["region_side"],
             "clusterIdentifier": target["cluster_identifier"],
             "namespace": target["namespace"],
             "deploymentName": target["deployment_name"],
@@ -998,9 +1001,20 @@ def _validate_region_eks_service(svc: Dict[str, Any], index: int) -> None:
     if not isinstance(params, dict):
         raise ValueError(f"services[{index}].parameters must be an object for eks:scale-deployment.")
 
-    side = str(target.get("region") or "").strip().lower()
-    if side not in ("primary", "secondary"):
-        raise ValueError(f"services[{index}].target.region must be 'primary' or 'secondary'.")
+    region_value = str(target.get("region") or "").strip()
+    if not region_value:
+        raise ValueError(f"services[{index}].target.region is required for eks:scale-deployment.")
+
+    primary_region = str(svc.get("__primary_region__") or "").strip()
+    secondary_region = str(svc.get("__secondary_region__") or "").strip()
+    try:
+        _resolve_region_eks_target_region(
+            region_value,
+            primary_region=primary_region,
+            secondary_region=secondary_region,
+        )
+    except ValueError as e:
+        raise ValueError(f"services[{index}].target.region {e}")
 
     for field in ("cluster_identifier", "namespace", "deployment_name"):
         value = str(target.get(field) or "").strip()
@@ -1028,6 +1042,26 @@ def _validate_region_dns_service(svc: Dict[str, Any], index: int) -> None:
     value = str(svc.get("value") or "").strip()
     if not value:
         raise ValueError(f"services[{index}].value is required for dns actions.")
+
+
+def _resolve_region_eks_target_region(
+    region_value: str,
+    *,
+    primary_region: str,
+    secondary_region: str,
+) -> str:
+    text = str(region_value or "").strip()
+    lowered = text.lower()
+    if lowered == "primary":
+        return primary_region
+    if lowered == "secondary":
+        return secondary_region
+    if text in (primary_region, secondary_region):
+        return text
+    raise ValueError(
+        f"must be '{primary_region}' or '{secondary_region}'. "
+        "The legacy aliases 'primary' and 'secondary' are also accepted."
+    )
 
 
 def _optional_bool(value: Any, default: bool) -> bool:
