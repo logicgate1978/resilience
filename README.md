@@ -222,7 +222,7 @@ Responsibilities:
   </tbody>
 </table>
 
-The native FIS generator file for `efs` is still a scaffold, but `efs:failover` is implemented through the custom action path.
+`efs:failover` is implemented through the custom action path.
 
 ## Manifest Design
 
@@ -1023,8 +1023,7 @@ These are important if you continue the work:
 2. Cross-Region CloudWatch auto-collection is not implemented yet.
 3. The current Aurora Global Database discovery is intentionally strict and fails on ambiguous matches.
 4. `eks:delete-pod` exists in template generation, but EKS impacted-resource discovery and EKS-specific observability are not implemented.
-5. `s3` and `efs` generator files are placeholders only.
-6. There is no dedicated test suite in the repository yet.
+5. There is no dedicated test suite in the repository yet.
 
 ## Recommended Next Improvements
 
