@@ -1,7 +1,8 @@
 import base64
+import os
 import tempfile
 from typing import Any, Dict
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from botocore.signers import RequestSigner
 from kubernetes import client
@@ -51,6 +52,48 @@ def get_eks_cluster_connection(session, region: str, cluster_name: str) -> Dict[
     }
 
 
+def _is_valid_proxy_url(value: str) -> bool:
+    parsed = urlparse(value or "")
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _host_matches_no_proxy(hostname: str, no_proxy_value: str) -> bool:
+    host = (hostname or "").strip().lower()
+    entries = [entry.strip().lower() for entry in str(no_proxy_value or "").split(",") if entry.strip()]
+    for entry in entries:
+        if entry == "*":
+            return True
+        if host == entry:
+            return True
+        if entry.startswith(".") and host.endswith(entry):
+            return True
+        if not entry.startswith(".") and host.endswith(f".{entry}"):
+            return True
+    return False
+
+
+def _resolve_proxy_url(endpoint: str) -> str:
+    hostname = urlparse(endpoint).hostname or ""
+    no_proxy_value = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+    if _host_matches_no_proxy(hostname, no_proxy_value):
+        return ""
+
+    proxy_candidates = [
+        os.environ.get("HTTPS_PROXY"),
+        os.environ.get("https_proxy"),
+        os.environ.get("HTTP_PROXY"),
+        os.environ.get("http_proxy"),
+        os.environ.get("ALL_PROXY"),
+        os.environ.get("all_proxy"),
+    ]
+    for candidate in proxy_candidates:
+        if not candidate:
+            continue
+        if _is_valid_proxy_url(candidate):
+            return candidate
+    return ""
+
+
 def create_apps_v1_api(session, region: str, cluster_name: str):
     connection = get_eks_cluster_connection(session, region, cluster_name)
     token = build_eks_bearer_token(session, region, cluster_name)
@@ -66,6 +109,8 @@ def create_apps_v1_api(session, region: str, cluster_name: str):
     cfg.verify_ssl = True
     cfg.ssl_ca_cert = ca_file.name
     cfg.api_key = {"authorization": f"Bearer {token}"}
+    proxy_url = _resolve_proxy_url(connection["endpoint"])
+    cfg.proxy = proxy_url or None
 
     api_client = client.ApiClient(configuration=cfg)
     return client.AppsV1Api(api_client)

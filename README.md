@@ -613,6 +613,12 @@ The custom scaler:
 3. patches the target Deployment replica count through the Kubernetes API
 4. optionally waits until the Deployment is reconciled and ready
 
+Proxy behavior:
+
+- the Kubernetes client honors valid proxy environment variables such as `HTTPS_PROXY`
+- malformed proxy values are ignored
+- if the EKS cluster endpoint matches `NO_PROXY`, the client connects directly
+
 Readiness is considered complete when:
 
 - `status.observedGeneration >= metadata.generation`
