@@ -9,6 +9,7 @@ from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
 from validations.dns import DNSValidator
 from validations.ec2 import EC2Validator
+from validations.efs import EFSValidator
 from validations.eks import EKSValidator
 from validations.rds import RDSValidator
 from validations.s3 import S3Validator
@@ -21,6 +22,7 @@ _VALIDATORS = {
     "asg": ASGValidator(),
     "dns": DNSValidator(),
     "ec2": EC2Validator(),
+    "efs": EFSValidator(),
     "eks": EKSValidator(),
     "rds": RDSValidator(),
     "s3": S3Validator(),

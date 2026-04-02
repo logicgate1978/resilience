@@ -1,0 +1,7 @@
+resilience_test_type: component
+region: ap-southeast-1
+services:
+- name: efs
+  action: failover
+  tags: Name=test-efs
+  wait_for_ready: true

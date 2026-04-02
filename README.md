@@ -210,6 +210,8 @@ Responsibilities:
     <tr><td><code>network:disrupt-connectivity</code></td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
     <tr><th colspan="3" align="left">S3</th></tr>
     <tr><td><code>s3:pause-replication</code></td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
+    <tr><th colspan="3" align="left">EFS</th></tr>
+    <tr><td><code>efs:failover</code></td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable. This is a custom boto3 implementation.</td><td></td></tr>
     <tr><th colspan="3" align="left">EKS</th></tr>
     <tr><td><code>eks:delete-pod</code></td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td></tr>
     <tr><td><code>eks:pod-cpu-stress</code></td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td></tr>
@@ -220,7 +222,7 @@ Responsibilities:
   </tbody>
 </table>
 
-Current placeholder generator files still exist for `efs`, but they are scaffolds only and do not currently define real actions.
+The native FIS generator file for `efs` is still a scaffold, but `efs:failover` is implemented through the custom action path.
 
 ## Manifest Design
 
@@ -258,6 +260,7 @@ Current placeholder generator files still exist for `efs`, but they are scaffold
     <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
     <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
+    <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code></td><td>Whether the EFS failover action waits until the replication configuration is fully deleted before completing. Defaults to <code>true</code>.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
@@ -552,6 +555,7 @@ Current implementation:
 - `ec2:terminate` when `service.use_fis = false`
 - `rds:reboot` when `service.use_fis = false`
 - `rds:failover` when `service.use_fis = false`
+- `efs:failover`
 - `dns:set-value`
 - `dns:set-weight`
 - `asg:scale`
@@ -600,6 +604,19 @@ Current behavior:
   - forces failover on the selected DB clusters with `FailoverDBCluster`
   - waits until each cluster returns to `available`
   - when the original writer can be determined, waits until the cluster writer changes
+
+### Current `efs:failover` Behavior
+
+The custom EFS failover action:
+
+1. resolves EFS file systems from `service.tags`
+2. verifies that each selected file system has a replication configuration
+3. deletes the replication configuration by calling `DeleteReplicationConfiguration` on the source file system
+4. either:
+   - completes immediately when `service.wait_for_ready = false`
+   - or polls until the replication configuration is no longer returned by `DescribeReplicationConfigurations`
+
+If your tag selection matches multiple file systems, the action operates on all of them. It fails fast when any selected file system does not have replication configured.
 
 ### Current `asg:scale` Behavior
 

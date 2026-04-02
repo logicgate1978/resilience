@@ -13,6 +13,10 @@ actions:
       - verify_record_exists
       - verify_value_present
       - verify_weight_targets
+  - action: efs:failover
+    validations:
+      - verify_resource_existence
+      - verify_replication_configuration_exists
   - action: ec2:terminate
     validations:
       - verify_resource_existence

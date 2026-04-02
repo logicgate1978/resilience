@@ -250,6 +250,43 @@ def _collect_s3_buckets(session, region: str, tags: Dict[str, str]) -> List[str]
     return arns
 
 
+def _collect_efs_file_systems(session, region: str, tags: Dict[str, str]) -> List[str]:
+    efs = session.client("efs", region_name=region)
+    arns: List[str] = []
+
+    marker = None
+    while True:
+        kwargs = {}
+        if marker:
+            kwargs["Marker"] = marker
+        resp = efs.describe_file_systems(**kwargs)
+        for fs in resp.get("FileSystems", []):
+            file_system_id = fs.get("FileSystemId")
+            if not file_system_id:
+                continue
+
+            actual_tags: Dict[str, str] = {}
+            if tags:
+                try:
+                    tag_resp = efs.list_tags_for_resource(ResourceId=file_system_id)
+                    actual_tags = {t["Key"]: t.get("Value", "") for t in tag_resp.get("Tags", []) if "Key" in t}
+                except Exception:
+                    continue
+                if not _tags_match(tags, actual_tags):
+                    continue
+
+            fs_arn = fs.get("FileSystemArn")
+            if not fs_arn:
+                continue
+            arns.append(fs_arn)
+
+        marker = resp.get("NextMarker")
+        if not marker:
+            break
+
+    return arns
+
+
 def collect_service_resource_arns(
     svc: Dict[str, Any],
     *,
@@ -285,6 +322,9 @@ def collect_service_resource_arns(
 
     if name == "s3" and action in ("pause-replication", "pause-relication"):
         return _collect_s3_buckets(session, region, tags)
+
+    if name == "efs" and action == "failover":
+        return _collect_efs_file_systems(session, region, tags)
 
     return []
 
