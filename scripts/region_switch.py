@@ -1051,16 +1051,10 @@ def _resolve_region_eks_target_region(
     secondary_region: str,
 ) -> str:
     text = str(region_value or "").strip()
-    lowered = text.lower()
-    if lowered == "primary":
-        return primary_region
-    if lowered == "secondary":
-        return secondary_region
     if text in (primary_region, secondary_region):
         return text
     raise ValueError(
-        f"must be '{primary_region}' or '{secondary_region}'. "
-        "The legacy aliases 'primary' and 'secondary' are also accepted."
+        f"must be '{primary_region}' or '{secondary_region}'."
     )
 
 
