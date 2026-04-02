@@ -1,4 +1,3 @@
-resilience_test_type: component
 region: ap-southeast-1
 services:
 - name: common

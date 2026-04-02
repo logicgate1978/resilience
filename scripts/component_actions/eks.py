@@ -142,7 +142,7 @@ class EKSScaleDeploymentAction(CustomComponentAction):
             },
             "impacted_resource": {
                 "service": "eks:scale-deployment",
-                "arn": f"eks://{cluster_identifier}/{namespace}/deployment/{deployment_name}",
+                "arn": f"eks://{region}/{cluster_identifier}/{namespace}/deployment/{deployment_name}",
                 "selection_mode": "CUSTOM",
             },
         }

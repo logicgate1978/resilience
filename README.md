@@ -4,9 +4,9 @@ This repository contains a manifest-driven resilience testing framework for AWS 
 
 It currently supports three execution models:
 
-1. AWS Fault Injection Service (FIS) for component and site resilience tests
-2. AWS ARC Region switch for regional Aurora Global Database failover and switchover tests
-3. Custom actions for behaviors that are not available as native FIS actions
+1. AWS Fault Injection Service (FIS) for native FIS-backed actions
+2. AWS ARC Region switch for Aurora Global Database failover and switchover when `service.use_arc: true`
+3. Custom actions for behaviors that are not available as native FIS actions, or for supported `use_fis: false` / `use_arc: false` fallbacks
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 
@@ -24,19 +24,19 @@ The framework is meant to:
 The current architecture deliberately separates:
 
 - FIS-based infrastructure chaos actions
-- ARC-based regional switch actions
+- ARC-based Aurora Global Database actions
 - custom actions
 - observability and reporting
 - resource discovery
 
+Important manifest rule:
+
+- one manifest can contain many actions, but all actions in that manifest must resolve to the same engine family: FIS, ARC, or custom
+- the framework does not support mixing FIS, ARC, and custom implementations in a single manifest
+
 ## High-Level Flows
 
-### Component and Site Tests
-
-Manifest:
-
-- `resilience_test_type: component`
-- `resilience_test_type: site`
+### FIS and Custom Workflows
 
 Execution path:
 
@@ -50,21 +50,20 @@ Execution path:
 6. Results are written to disk
 7. `scripts/chart.py` generates an HTML report
 
-### Region Tests
+Top-level and service-level scope:
 
-Manifest:
+- `region`, `zone`, `primary_region`, and `secondary_region` can be declared at the top level or on an individual service block
+- service-level values take precedence over top-level defaults
 
-- `resilience_test_type: region`
+### ARC Workflows
 
 Execution path:
 
-1. `scripts/fis.py` detects `region` mode
+1. `scripts/fis.py` detects that all actions in the manifest are ARC-backed
 2. `scripts/region_switch.py` validates the manifest
 3. `scripts/resource.py` discovers the impacted resources for reporting
 4. `scripts/region_switch.py` builds a region execution plan
-5. The selected region engine runs:
-   - ARC for Aurora Global Database actions when `use_arc: true`
-   - custom boto3/Kubernetes/Route 53 execution for supported non-ARC region actions
+5. ARC runs the selected Aurora Global Database actions
 6. Health-check observability runs around the switch window
 7. Results are written to disk
 8. `scripts/chart.py` generates an HTML report
@@ -237,16 +236,19 @@ Responsibilities:
   </thead>
   <tbody>
     <tr><th colspan="4" align="left">Top-Level Fields</th></tr>
-    <tr><td><code>resilience_test_type</code></td><td>Yes</td><td>All manifests</td><td>Selects the execution mode. Current values are <code>component</code>, <code>site</code>, and <code>region</code>.</td></tr>
-    <tr><td><code>region</code></td><td>Yes for <code>component</code> and <code>site</code>, except some global custom actions</td><td>Component, Site</td><td>AWS Region used for FIS execution, resource discovery, and single-Region observability. For custom-only global actions such as Route 53 DNS, the framework can fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when <code>region</code> is omitted.</td></tr>
-    <tr><td><code>zone</code></td><td>Yes for <code>site</code></td><td>Site</td><td>Availability Zone scope for site-level tests. This is used to narrow supported resources to one AZ.</td></tr>
-    <tr><td><code>primary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current active Region for the workload. Used for Aurora Global Database failover or switchover planning.</td></tr>
-    <tr><td><code>secondary_region</code></td><td>Yes for <code>region</code></td><td>Region</td><td>Current standby Region for the workload. Used as the alternate side for regional switching.</td></tr>
+    <tr><td><code>region</code></td><td>Optional default</td><td>FIS actions, single-Region custom actions</td><td>Default AWS Region for execution, resource discovery, and observability. A service-level <code>service.region</code> overrides it. For custom-only global actions such as Route 53 DNS, the framework can fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when no region is declared.</td></tr>
+    <tr><td><code>zone</code></td><td>Optional default</td><td>AZ-scoped actions</td><td>Default Availability Zone scope. A service-level <code>service.zone</code> overrides it.</td></tr>
+    <tr><td><code>primary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default current active Region for cross-Region Aurora Global Database actions. A service-level <code>service.primary_region</code> overrides it.</td></tr>
+    <tr><td><code>secondary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default standby Region for cross-Region Aurora Global Database actions. A service-level <code>service.secondary_region</code> overrides it.</td></tr>
     <tr><td><code>services</code></td><td>Yes</td><td>All manifests</td><td>List of service/action blocks that describe what resilience action to run.</td></tr>
     <tr><td><code>observability</code></td><td>No</td><td>All manifests</td><td>Optional configuration for health checks and CloudWatch metric collection around the experiment window.</td></tr>
     <tr><th colspan="4" align="left">Service Block Fields</th></tr>
     <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>common</code>, <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
     <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
+    <tr><td><code>service.region</code></td><td>Optional</td><td>Region-scoped actions</td><td>Action-specific Region override. When present, it takes precedence over top-level <code>region</code>.</td></tr>
+    <tr><td><code>service.zone</code></td><td>Optional</td><td>AZ-scoped actions</td><td>Action-specific Availability Zone override. When present, it takes precedence over top-level <code>zone</code>.</td></tr>
+    <tr><td><code>service.primary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific active Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>primary_region</code>.</td></tr>
+    <tr><td><code>service.secondary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific standby Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>secondary_region</code>.</td></tr>
     <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
     <tr><td><code>service.value</code></td><td>Yes for some actions</td><td><code>dns:set-value</code>, <code>dns:set-weight</code></td><td>Action-specific value payload. For <code>dns:set-value</code>, this is the target record value. For <code>dns:set-weight</code>, this is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
@@ -258,15 +260,14 @@ Responsibilities:
     <tr><td><code>service.destination_buckets</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of destination S3 bucket names to narrow which replication destinations are paused.</td></tr>
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
     <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
-    <tr><td><code>service.use_arc</code></td><td>Optional</td><td>Region actions</td><td>Chooses the execution engine for supported regional actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom non-ARC implementation such as boto3.</td></tr>
+    <tr><td><code>service.use_arc</code></td><td>Optional</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Chooses the execution engine for supported Aurora Global Database actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom boto3 implementation.</td></tr>
     <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
     <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code></td><td>Whether the EFS failover action waits until the replication configuration is fully deleted before completing. Defaults to <code>true</code>.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
     <tr><th colspan="4" align="left">Service Target Fields</th></tr>
-    <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>EKS cluster name used by the FIS pod target.</td></tr>
-    <tr><td><code>service.target.region</code></td><td>Yes for region EKS scaling</td><td>Region <code>eks:scale-deployment</code></td><td>The actual AWS Region of the target EKS cluster, for example <code>ap-southeast-1</code> or <code>ap-southeast-2</code>.</td></tr>
+    <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for EKS actions</td><td>EKS actions</td><td>EKS cluster name used by either the FIS pod target or the custom deployment scaler.</td></tr>
     <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
     <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
     <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
@@ -319,14 +320,13 @@ Important sequencing note:
 - For native FIS actions, that matches FIS behavior when no `startAfter` is set.
 - For custom-only manifests, the framework also uses dependency-driven execution and only waits when `service.start_after` is declared.
 
-### Component Example
+### FIS Example
 
 See `manifests/component-ec2.yml`.
 
 Example shape:
 
 ```yaml
-resilience_test_type: component
 region: ap-southeast-1
 services:
 - name: ec2
@@ -364,14 +364,13 @@ observability:
     interval: 10
 ```
 
-### Site Example
+### AZ-Scoped Example
 
-Expected additions relative to `component`:
+Expected additions relative to a plain single-Region manifest:
 
-- `resilience_test_type: site`
 - `zone: <availability-zone>`
 
-Site scoping is applied to targets where supported. The code already contains special handling for:
+AZ scoping is applied to targets where supported. The code already contains special handling for:
 
 - EC2 instances
 - subnets
@@ -379,14 +378,13 @@ Site scoping is applied to targets where supported. The code already contains sp
 - RDS DB instances
 - Auto Scaling groups
 
-### Region Example
+### ARC Example
 
 See `manifests/geo-rds.yml`, `manifests/geo-eks.yml`, and `manifests/geo-dns.yml`.
 
 Example shape:
 
 ```yaml
-resilience_test_type: region
 primary_region: ap-southeast-1
 secondary_region: ap-southeast-2
 services:
@@ -405,15 +403,14 @@ observability:
     interval: 10
 ```
 
-Notes on region manifests:
+Notes on Aurora Global Database manifests:
 
 - `from: primary` means switch away from the current primary Region into the secondary Region
 - `from: secondary` means switch back into the primary Region
 - tags are used for discovery; the user does not need to provide the Aurora Global Database ARN or member cluster ARNs
-- `use_arc` only applies to `resilience_test_type: region`
+- `use_arc` only applies to Aurora Global Database actions
 - if `use_arc` is omitted, the current default behavior is `true`
-- for region EKS scaling, use the actual AWS Region in `service.target.region`, plus an explicit `cluster_identifier`
-- Route 53 DNS actions can also be included in region manifests; they use the same target and value fields as the component DNS manifests
+- for `eks:scale-deployment`, use `service.region` plus an explicit `cluster_identifier`
 
 ## ARC Region Switch Design
 
@@ -421,21 +418,20 @@ The ARC path is intentionally separate from the FIS path.
 
 ### Why
 
-Aurora Global Database failover and switchover are orchestrated using ARC Region switch rather than a native FIS action in this codebase. That keeps regional orchestration separate from FIS experiment-template generation and makes it easier to grow into more sophisticated region-recovery workflows later.
+Aurora Global Database failover and switchover are orchestrated using ARC Region switch rather than a native FIS action in this codebase. That keeps ARC orchestration separate from FIS experiment-template generation and makes it easier to grow into more sophisticated region-recovery workflows later.
 
 ### Current Region Execution Implementation
 
-The current region path in `scripts/region_switch.py` does the following:
+The current ARC path in `scripts/region_switch.py` does the following:
 
-1. validates the region manifest
+1. validates the ARC manifest
 2. resolves any action-specific targets needed by the selected services
-3. builds a region execution plan
+3. builds an ARC execution plan
 4. selects the engine per service block:
    - ARC when `use_arc = true`
    - non-ARC custom execution when `use_arc = false`
-   - custom execution for supported region actions such as EKS deployment scaling and Route 53 DNS updates
 5. applies `service.start_after` dependencies
-6. runs region actions in parallel by default when `service.start_after` is omitted, and writes a unified summary for reporting
+6. runs ARC actions in parallel by default when `service.start_after` is omitted, and writes a unified summary for reporting
 
 ### ARC Path
 
@@ -458,19 +454,6 @@ When `use_arc = false`, the code currently uses direct boto3 RDS APIs:
 - `rds.switchover_global_cluster()` for `switchover-global-db`
 
 This exists because native FIS support for Aurora Global Database failover and switchover is not assumed in this codebase. The framework is designed so a future region action can choose ARC or a different custom implementation without changing the manifest contract.
-
-### Region DNS Path
-
-For `dns:set-value` and `dns:set-weight` under `resilience_test_type: region`, the framework reuses the existing Route 53 custom action implementation from `scripts/component_actions/dns.py`.
-
-Current behavior:
-
-- Route 53 record lookup is performed from `service.target.hosted_zone`, `service.target.record_name`, and `service.target.record_type`
-- `dns:set-value` updates one simple, non-alias record
-- `dns:set-weight` updates any number of weighted records by `SetIdentifier` using `service.value`
-- Route 53 changes are applied with `UPSERT` and polled until `INSYNC`
-
-This keeps DNS region tests policy-aware at the record level without introducing a second DNS executor.
 
 ### Current Discovery Rules for Aurora Global Database
 
@@ -543,9 +526,9 @@ Because the registry dynamically imports `*_template_generator.py` files, new se
 
 This pattern is useful for future service actions that require structured target or action parameters rather than plain tags.
 
-## Custom Component Action Design
+## Custom Action Design
 
-Custom component actions are used when the framework needs to execute a component/site action that is not available as a native FIS action, or when a supported action explicitly opts out of FIS with `service.use_fis: false`.
+Custom actions are used when the framework needs to execute an action that is not available as a native FIS action, or when a supported action explicitly opts out of FIS or ARC with `service.use_fis: false` or `service.use_arc: false`.
 
 Current implementation:
 
@@ -555,6 +538,8 @@ Current implementation:
 - `ec2:terminate` when `service.use_fis = false`
 - `rds:reboot` when `service.use_fis = false`
 - `rds:failover` when `service.use_fis = false`
+- `rds:failover-global-db` when `service.use_arc = false`
+- `rds:switchover-global-db` when `service.use_arc = false`
 - `efs:failover`
 - `dns:set-value`
 - `dns:set-weight`
@@ -565,10 +550,8 @@ Design rules:
 
 1. Native FIS actions stay in `scripts/template_generator/`.
 2. Custom-only component actions live under `scripts/component_actions/`.
-3. `scripts/fis.py` routes a component/site manifest to either:
-   - the FIS template path
-   - the custom component-action path
-4. Mixing native FIS actions and custom component actions in the same manifest is intentionally not supported yet.
+3. `scripts/fis.py` routes a manifest to one engine family: FIS, ARC, or custom.
+4. Mixing FIS, ARC, and custom actions in the same manifest is intentionally not supported.
 
 ### Current `ec2` boto3 Fallback Behavior
 
@@ -593,7 +576,7 @@ Current behavior:
 
 ### Current `rds` boto3 Fallback Behavior
 
-When `service.use_fis = false` for `rds:reboot` or `rds:failover`, the framework uses the RDS API directly instead of creating a FIS experiment.
+When `service.use_fis = false` for `rds:reboot` or `rds:failover`, or when `service.use_arc = false` for Aurora Global Database actions, the framework uses the RDS API directly instead of creating a FIS experiment or ARC plan.
 
 Current behavior:
 
@@ -604,6 +587,12 @@ Current behavior:
   - forces failover on the selected DB clusters with `FailoverDBCluster`
   - waits until each cluster returns to `available`
   - when the original writer can be determined, waits until the cluster writer changes
+- `rds:failover-global-db`
+  - calls `FailoverGlobalCluster`
+  - waits until the new writer is promoted and both Regions report a synchronized, `available` Aurora Global Database state
+- `rds:switchover-global-db`
+  - calls `SwitchoverGlobalCluster`
+  - waits until the new writer is promoted and both Regions report a synchronized, `available` Aurora Global Database state
 
 ### Current `efs:failover` Behavior
 

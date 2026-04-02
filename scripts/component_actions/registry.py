@@ -5,7 +5,7 @@ import importlib
 import pkgutil
 from typing import Any, Dict, List, Optional, Tuple
 
-from utility import normalize_service_name, utc_ts
+from utility import coerce_bool, normalize_service_name, resolve_service_region, utc_ts
 
 from .base import CustomComponentAction
 
@@ -118,12 +118,17 @@ def _split_manifest_services(manifest: Dict[str, Any]) -> Tuple[List[Dict[str, A
         service_name = normalize_service_name(svc.get("name"))
         action = str(svc.get("action") or "").strip().lower()
         handler = _find_action_handler(service_name, action)
+        if service_name == "rds" and action in ("failover-global-db", "switchover-global-db"):
+            if coerce_bool(svc.get("use_arc"), True):
+                continue
+            if handler is None:
+                raise ValueError(
+                    f"rds:{action} with use_arc=false requires a custom global RDS handler, but none is registered."
+                )
+            custom_services.append(svc)
+            continue
         if service_name == "ec2" and action in ("stop", "reboot", "terminate"):
-            use_fis_value = svc.get("use_fis", True)
-            if isinstance(use_fis_value, bool):
-                use_fis = use_fis_value
-            else:
-                use_fis = str(use_fis_value).strip().lower() not in ("0", "false", "no", "n", "off")
+            use_fis = coerce_bool(svc.get("use_fis"), True)
             if use_fis:
                 fis_services.append(svc)
             elif handler is None:
@@ -134,11 +139,7 @@ def _split_manifest_services(manifest: Dict[str, Any]) -> Tuple[List[Dict[str, A
                 custom_services.append(svc)
             continue
         if service_name == "rds" and action in ("reboot", "failover"):
-            use_fis_value = svc.get("use_fis", True)
-            if isinstance(use_fis_value, bool):
-                use_fis = use_fis_value
-            else:
-                use_fis = str(use_fis_value).strip().lower() not in ("0", "false", "no", "n", "off")
+            use_fis = coerce_bool(svc.get("use_fis"), True)
             if use_fis:
                 fis_services.append(svc)
             elif handler is None:
@@ -149,11 +150,7 @@ def _split_manifest_services(manifest: Dict[str, Any]) -> Tuple[List[Dict[str, A
                 custom_services.append(svc)
             continue
         if service_name == "common" and action == "wait":
-            use_fis_value = svc.get("use_fis", True)
-            if isinstance(use_fis_value, bool):
-                use_fis = use_fis_value
-            else:
-                use_fis = str(use_fis_value).strip().lower() not in ("0", "false", "no", "n", "off")
+            use_fis = coerce_bool(svc.get("use_fis"), True)
             if use_fis:
                 fis_services.append(svc)
             elif handler is None:
@@ -172,6 +169,11 @@ def _split_manifest_services(manifest: Dict[str, Any]) -> Tuple[List[Dict[str, A
 def manifest_has_custom_actions(manifest: Dict[str, Any]) -> bool:
     _, custom_services = _split_manifest_services(manifest)
     return len(custom_services) > 0
+
+
+def service_uses_custom_engine(svc: Dict[str, Any]) -> bool:
+    _, custom_services = _split_manifest_services({"services": [svc]})
+    return bool(custom_services)
 
 
 def validate_component_action_mix(manifest: Dict[str, Any]) -> None:
@@ -195,8 +197,7 @@ def build_custom_execution_plan(
     if not custom_services:
         raise ValueError("No custom component actions were found in the manifest.")
 
-    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
-    plan_name = f"resilience-{rtype}-{utc_ts()}"
+    plan_name = f"resilience-custom-{utc_ts()}"
     items: List[Dict[str, Any]] = []
 
     for index, svc in enumerate(custom_services, start=1):
@@ -206,15 +207,16 @@ def build_custom_execution_plan(
         if handler is None:
             raise ValueError(f"Unsupported custom component action: {service_name}:{action}")
 
+        service_region = resolve_service_region(manifest, svc, default=region)
         item = handler.build_plan_item(
             manifest=manifest,
             svc=svc,
             session=session,
-            region=region,
+            region=service_region,
             index=index,
             default_timeout_seconds=default_timeout_seconds,
         )
-        item["region"] = region
+        item["region"] = service_region
         items.append(item)
 
     start_after_map = _resolve_custom_start_after(custom_services, [str(item["name"]) for item in items])

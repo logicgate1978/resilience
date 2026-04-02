@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from utility import resolve_service_zone
+
 from .base import ManifestService, ServiceTemplateGenerator
 
 
@@ -26,8 +28,7 @@ class NetworkTemplateGenerator(ServiceTemplateGenerator):
 
         if not svc.duration:
             raise ValueError("network:disrupt-connectivity requires services[].duration (e.g. PT30M).")
-        rtype = (manifest.get("resilience_test_type") or "").strip().lower()
         return {
             "duration": svc.duration,
-            "scope": "availability-zone" if rtype == "site" else "all",
+            "scope": "availability-zone" if resolve_service_zone(manifest, svc.config) else "all",
         }

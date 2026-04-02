@@ -91,6 +91,70 @@ def parse_bool(value: Optional[str], default: bool = False) -> bool:
     return default
 
 
+def coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return parse_bool(str(value), default=default)
+
+
+def resolve_service_field(
+    manifest: Dict[str, Any],
+    svc: Optional[Dict[str, Any]],
+    field_name: str,
+    default: Optional[Any] = None,
+) -> Optional[Any]:
+    if isinstance(svc, dict):
+        value = svc.get(field_name)
+        if value is not None:
+            if not isinstance(value, str) or value.strip() != "":
+                return value
+
+    value = manifest.get(field_name) if isinstance(manifest, dict) else None
+    if value is not None:
+        if not isinstance(value, str) or value.strip() != "":
+            return value
+
+    return default
+
+
+def resolve_service_region(
+    manifest: Dict[str, Any],
+    svc: Optional[Dict[str, Any]],
+    default: Optional[str] = None,
+) -> Optional[str]:
+    value = resolve_service_field(manifest, svc, "region", default=default)
+    return str(value).strip() if isinstance(value, str) else value
+
+
+def resolve_service_zone(
+    manifest: Dict[str, Any],
+    svc: Optional[Dict[str, Any]],
+    default: Optional[str] = None,
+) -> Optional[str]:
+    value = resolve_service_field(manifest, svc, "zone", default=default)
+    return str(value).strip() if isinstance(value, str) else value
+
+
+def resolve_service_primary_region(
+    manifest: Dict[str, Any],
+    svc: Optional[Dict[str, Any]],
+    default: Optional[str] = None,
+) -> Optional[str]:
+    value = resolve_service_field(manifest, svc, "primary_region", default=default)
+    return str(value).strip() if isinstance(value, str) else value
+
+
+def resolve_service_secondary_region(
+    manifest: Dict[str, Any],
+    svc: Optional[Dict[str, Any]],
+    default: Optional[str] = None,
+) -> Optional[str]:
+    value = resolve_service_field(manifest, svc, "secondary_region", default=default)
+    return str(value).strip() if isinstance(value, str) else value
+
+
 def get_account_id(sts_client) -> str:
     return sts_client.get_caller_identity()["Account"]
 
@@ -130,7 +194,7 @@ def resolve_iam_role_arns_from_names(role_names_csv: str) -> List[str]:
 
 def apply_site_scope_to_target(target: Dict[str, Any], resource_type: str, zone: str) -> None:
     """
-    If resilience_test_type=site, add filters/parameters to scope target resources to the AZ.
+    Add filters or parameters to scope supported target resources to a specific AZ.
     """
     if resource_type == "aws:ec2:instance":
         target.setdefault("filters", [])

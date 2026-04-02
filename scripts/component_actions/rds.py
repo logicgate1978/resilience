@@ -3,8 +3,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from component_actions.base import CustomComponentAction
-from resource import collect_service_resource_arns
-from utility import normalize_service_name
+from resource import collect_service_resource_arns, discover_rds_global_clusters
+from utility import (
+    normalize_service_name,
+    resolve_service_primary_region,
+    resolve_service_secondary_region,
+    resolve_service_zone,
+)
 
 
 def _utc_now_iso() -> str:
@@ -50,7 +55,7 @@ def _describe_db_instance(rds, instance_identifier: str) -> Dict[str, Any]:
 
 class RDSAction(CustomComponentAction):
     service_name = "rds"
-    action_names = ["reboot", "failover"]
+    action_names = ["reboot", "failover", "failover-global-db", "switchover-global-db"]
 
     def build_plan_item(
         self,
@@ -64,11 +69,20 @@ class RDSAction(CustomComponentAction):
     ) -> Dict[str, Any]:
         _ = manifest
         action = str(svc.get("action") or "").strip().lower()
+        if action in ("failover-global-db", "switchover-global-db"):
+            return self._build_global_db_plan_item(
+                manifest=manifest,
+                svc=svc,
+                session=session,
+                index=index,
+                default_timeout_seconds=default_timeout_seconds,
+            )
+
         arns = collect_service_resource_arns(
             svc,
             session=session,
             region=region,
-            zone=None,
+            zone=resolve_service_zone(manifest, svc),
         )
         if not arns:
             raise ValueError(f"rds:{action} did not resolve any RDS resources from the manifest selection.")
@@ -123,6 +137,73 @@ class RDSAction(CustomComponentAction):
             "impacted_resources": impacted_resources,
         }
 
+    def _build_global_db_plan_item(
+        self,
+        *,
+        manifest: Dict[str, Any],
+        svc: Dict[str, Any],
+        session,
+        index: int,
+        default_timeout_seconds: int,
+    ) -> Dict[str, Any]:
+        action = str(svc.get("action") or "").strip().lower()
+        from_side = str(svc.get("from") or "").strip().lower()
+        primary_region = resolve_service_primary_region(manifest, svc)
+        secondary_region = resolve_service_secondary_region(manifest, svc)
+
+        if from_side not in ("primary", "secondary"):
+            raise ValueError(f"rds:{action} requires services[].from to be 'primary' or 'secondary'.")
+        if not primary_region or not secondary_region:
+            raise ValueError(
+                f"rds:{action} requires primary_region and secondary_region at the top level or service level."
+            )
+        if primary_region == secondary_region:
+            raise ValueError(f"rds:{action} requires primary_region and secondary_region to be different.")
+
+        resolved = discover_rds_global_clusters(
+            manifest={
+                "services": [svc],
+                "primary_region": primary_region,
+                "secondary_region": secondary_region,
+            },
+            session=session,
+        )
+        if len(resolved) != 1:
+            raise ValueError(f"rds:{action} expected exactly one Aurora global database match.")
+
+        target = dict(resolved[0])
+        impacted_resources = []
+        if target.get("global_cluster_arn"):
+            impacted_resources.append(
+                {
+                    "service": f"rds:{action}",
+                    "arn": str(target.get("global_cluster_arn") or ""),
+                    "selection_mode": "CUSTOM",
+                }
+            )
+        for cluster_arn in (target.get("member_cluster_arns") or {}).values():
+            impacted_resources.append(
+                {
+                    "service": f"rds:{action}",
+                    "arn": str(cluster_arn or ""),
+                    "selection_mode": "CUSTOM",
+                }
+            )
+
+        return {
+            "name": f"a_rds_{action}_{index}",
+            "engine": "custom",
+            "service": f"{normalize_service_name(svc.get('name'))}:{action}",
+            "action": action,
+            "description": f"{action.replace('-', ' ').title()} Aurora global database",
+            "target": target,
+            "parameters": {
+                "timeoutSeconds": int(default_timeout_seconds),
+                "useArc": False,
+            },
+            "impacted_resources": impacted_resources,
+        }
+
     def execute_item(
         self,
         *,
@@ -137,9 +218,18 @@ class RDSAction(CustomComponentAction):
         params = dict(item.get("parameters") or {})
         region = item["region"]
         effective_timeout_seconds = int(params.get("timeoutSeconds") or timeout_seconds)
-        rds = session.client("rds", region_name=region)
 
         original_state: Dict[str, Any] = {}
+
+        if action in ("failover-global-db", "switchover-global-db"):
+            return self._execute_global_db_item(
+                session=session,
+                item=item,
+                poll_seconds=poll_seconds,
+                timeout_seconds=effective_timeout_seconds,
+            )
+
+        rds = session.client("rds", region_name=region)
 
         try:
             if action == "reboot":
@@ -243,3 +333,164 @@ class RDSAction(CustomComponentAction):
                 "finalStatus": final_status,
             },
         }
+
+    def _execute_global_db_item(
+        self,
+        *,
+        session,
+        item: Dict[str, Any],
+        poll_seconds: int,
+        timeout_seconds: int,
+    ) -> Dict[str, Any]:
+        started_at = _utc_now_iso()
+        action = str(item.get("action") or "").strip().lower()
+        target = dict(item.get("target") or {})
+        primary_region = str(target.get("primary_region") or "").strip()
+        secondary_region = str(target.get("secondary_region") or "").strip()
+        from_side = str(target.get("from") or "").strip().lower()
+        target_region = secondary_region if from_side == "primary" else primary_region
+        client = session.client("rds", region_name=target_region)
+
+        request: Dict[str, Any] = {
+            "GlobalClusterIdentifier": target["global_cluster_identifier"],
+            "TargetDbClusterIdentifier": target["member_cluster_arns"][target_region],
+        }
+        if action == "failover-global-db":
+            request["AllowDataLoss"] = True
+
+        try:
+            if action == "failover-global-db":
+                response = client.failover_global_cluster(**request)
+            else:
+                response = client.switchover_global_cluster(**request)
+            final_state = _wait_for_global_db_ready(
+                session=session,
+                target=target,
+                poll_seconds=poll_seconds,
+                timeout_seconds=timeout_seconds,
+            )
+        except Exception as e:
+            ended_at = _utc_now_iso()
+            return {
+                "name": item["name"],
+                "status": "failed",
+                "reason": f"RDS API error during rds:{action}: {e}",
+                "startTime": started_at,
+                "endTime": ended_at,
+                "details": {
+                    "target": target,
+                    "parameters": item.get("parameters"),
+                },
+            }
+
+        ended_at = _utc_now_iso()
+        return {
+            "name": item["name"],
+            "status": "completed",
+            "reason": None,
+            "startTime": started_at,
+            "endTime": ended_at,
+            "details": {
+                "target": target,
+                "parameters": item.get("parameters"),
+                "request": request,
+                "initialResponse": response,
+                "finalGlobalDbState": final_state,
+            },
+        }
+
+
+def _describe_db_cluster_by_arn(rds_client, cluster_arn: str) -> Dict[str, Any]:
+    cluster_identifier = _db_cluster_identifier_from_arn(cluster_arn)
+    return _describe_db_cluster(rds_client, cluster_identifier)
+
+
+def _wait_for_global_cluster_role_once(
+    client,
+    global_cluster_identifier: str,
+    target_cluster_arn: str,
+) -> Dict[str, Any]:
+    response = client.describe_global_clusters(GlobalClusterIdentifier=global_cluster_identifier)
+    global_clusters = response.get("GlobalClusters") or []
+    if not global_clusters:
+        return {}
+
+    global_cluster = global_clusters[0]
+    status = str(global_cluster.get("Status") or "").strip().lower()
+    failover_state = global_cluster.get("FailoverState") or {}
+    members = global_cluster.get("GlobalClusterMembers") or []
+    target_is_writer = any(
+        m.get("DBClusterArn") == target_cluster_arn and bool(m.get("IsWriter"))
+        for m in members
+    )
+    in_progress = bool(failover_state.get("Status"))
+    if status == "available" and target_is_writer and not in_progress:
+        return global_cluster
+    return {}
+
+
+def _wait_for_global_db_ready(
+    *,
+    session,
+    target: Dict[str, Any],
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    member_cluster_arns = target["member_cluster_arns"]
+    primary_region = target["primary_region"]
+    secondary_region = target["secondary_region"]
+    target_region = secondary_region if str(target["from"]) == "primary" else primary_region
+    target_cluster_arn = member_cluster_arns[target_region]
+    control_client = session.client("rds", region_name=target_region)
+
+    start = time.time()
+    while True:
+        global_cluster = _wait_for_global_cluster_role_once(
+            client=control_client,
+            global_cluster_identifier=target["global_cluster_identifier"],
+            target_cluster_arn=target_cluster_arn,
+        )
+
+        cluster_states: Dict[str, Dict[str, Any]] = {}
+        member_states: Dict[str, Dict[str, Any]] = {}
+        all_available = True
+        all_synchronized = True
+
+        if global_cluster:
+            for member in global_cluster.get("GlobalClusterMembers") or []:
+                cluster_arn = str(member.get("DBClusterArn") or "")
+                if cluster_arn in member_cluster_arns.values():
+                    member_states[cluster_arn] = member
+
+        for member_region, cluster_arn in member_cluster_arns.items():
+            rds_client = session.client("rds", region_name=member_region)
+            cluster = _describe_db_cluster_by_arn(rds_client, cluster_arn)
+            cluster_states[member_region] = cluster
+
+            cluster_status = str(cluster.get("Status") or "").strip().lower()
+            if cluster_status != "available":
+                all_available = False
+
+            member = member_states.get(cluster_arn) or {}
+            is_writer = bool(member.get("IsWriter"))
+            sync_status = str(member.get("SynchronizationStatus") or "").strip().lower()
+
+            if not is_writer and sync_status != "connected":
+                all_synchronized = False
+            elif is_writer and sync_status not in ("", "connected"):
+                all_synchronized = False
+
+        if global_cluster and all_available and all_synchronized:
+            return {
+                "globalCluster": global_cluster,
+                "clusters": cluster_states,
+                "members": member_states,
+            }
+
+        if time.time() - start > timeout_seconds:
+            raise TimeoutError(
+                "Aurora global database did not reach a fully synchronized and available state "
+                f"in both Regions within {timeout_seconds}s."
+            )
+
+        time.sleep(max(1, poll_seconds))

@@ -1,4 +1,3 @@
-resilience_test_type: region
 primary_region: ap-southeast-1
 secondary_region: ap-southeast-2
 services:

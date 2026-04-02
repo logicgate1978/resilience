@@ -7,7 +7,12 @@ from kubernetes.client.exceptions import ApiException
 
 from component_actions.dns import DNSAction
 from component_actions.k8s_auth import create_apps_v1_api
-from utility import utc_ts
+from utility import (
+    resolve_service_primary_region,
+    resolve_service_region,
+    resolve_service_secondary_region,
+    utc_ts,
+)
 
 from resource import discover_rds_global_clusters
 
@@ -41,19 +46,6 @@ REGION_ACTION_CONFIG: Dict[str, Dict[str, Any]] = {
 
 
 def validate_region_manifest(manifest: Dict[str, Any]) -> None:
-    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
-    if rtype != "region":
-        raise ValueError("Region switch flow requires resilience_test_type to be 'region'.")
-
-    primary_region = manifest.get("primary_region")
-    secondary_region = manifest.get("secondary_region")
-    if not primary_region or not isinstance(primary_region, str):
-        raise ValueError("region resilience tests require top-level primary_region.")
-    if not secondary_region or not isinstance(secondary_region, str):
-        raise ValueError("region resilience tests require top-level secondary_region.")
-    if primary_region == secondary_region:
-        raise ValueError("primary_region and secondary_region must be different.")
-
     services = manifest.get("services")
     if not isinstance(services, list) or not services:
         raise ValueError("Top-level 'services' must be a non-empty list.")
@@ -61,15 +53,13 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
     for i, svc in enumerate(services):
         if not isinstance(svc, dict):
             raise ValueError(f"services[{i}] must be an object.")
-        svc["__primary_region__"] = primary_region
-        svc["__secondary_region__"] = secondary_region
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
         if name == "rds" and action in REGION_ACTION_CONFIG:
-            _validate_region_rds_service(svc, i)
+            _validate_region_rds_service(manifest, svc, i)
             continue
         if name == "eks" and action == "scale-deployment":
-            _validate_region_eks_service(svc, i)
+            _validate_region_eks_service(manifest, svc, i)
             continue
         if name == "dns" and action in ("set-value", "set-weight"):
             _validate_region_dns_service(svc, i)
@@ -83,8 +73,6 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
     rds_targets = discover_rds_global_clusters(manifest=manifest, session=session)
     rds_iter = iter(rds_targets)
     dns_handler = DNSAction()
-    primary_region = manifest["primary_region"]
-    secondary_region = manifest["secondary_region"]
 
     for index, svc in enumerate(manifest.get("services") or [], start=1):
         if not isinstance(svc, dict):
@@ -96,11 +84,7 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
         elif name == "eks" and action == "scale-deployment":
             target = svc["target"]
             params = svc["parameters"]
-            actual_region = _resolve_region_eks_target_region(
-                str(target.get("region") or "").strip(),
-                primary_region=primary_region,
-                secondary_region=secondary_region,
-            )
+            actual_region = str(resolve_service_region(manifest, svc) or "").strip()
             resolved.append(
                 {
                     "service": "eks:scale-deployment",
@@ -119,7 +103,7 @@ def resolve_region_targets(manifest: Dict[str, Any], session) -> List[Dict[str, 
                 manifest=manifest,
                 svc=svc,
                 session=session,
-                region=primary_region,
+                region=resolve_service_region(manifest, svc),
                 index=index,
                 default_timeout_seconds=600,
             )
@@ -404,12 +388,13 @@ def _build_arc_execution_item(
     execution_role_arn: str,
     index: int,
 ) -> Dict[str, Any]:
-    primary_region = manifest["primary_region"]
-    secondary_region = manifest["secondary_region"]
+    _ = manifest
+    primary_region = target["primary_region"]
+    secondary_region = target["secondary_region"]
     action = str(target["action"])
     action_cfg = REGION_ACTION_CONFIG[action]["arc"]
     from_side = str(target["from"])
-    target_region = _target_region(manifest, from_side)
+    target_region = secondary_region if from_side == "primary" else primary_region
 
     plan_name = f"rs-rds-{index}-{utc_ts()}".lower()
     plan_description = (
@@ -463,7 +448,6 @@ def _build_arc_execution_item(
             ],
             "tags": {
                 "managed-by": "fis.py",
-                "resilience-test-type": "region",
                 "service": "rds",
                 "action": action,
             },
@@ -483,11 +467,14 @@ def _build_non_arc_execution_item(
     target: Dict[str, Any],
     index: int,
 ) -> Dict[str, Any]:
+    _ = manifest
     action = str(target["action"])
     action_cfg = REGION_ACTION_CONFIG[action]["non_arc"]
     from_side = str(target["from"])
-    source_region = _source_region(manifest, from_side)
-    target_region = _target_region(manifest, from_side)
+    primary_region = target["primary_region"]
+    secondary_region = target["secondary_region"]
+    source_region = primary_region if from_side == "primary" else secondary_region
+    target_region = secondary_region if from_side == "primary" else primary_region
     target_cluster_arn = target["member_cluster_arns"][target_region]
 
     if action == "failover-global-db":
@@ -974,26 +961,26 @@ def _cluster_identifier_from_arn(cluster_arn: str) -> str:
 
 
 
-def _source_region(manifest: Dict[str, Any], from_side: str) -> str:
-    return manifest["primary_region"] if from_side == "primary" else manifest["secondary_region"]
-
-
-def _target_region(manifest: Dict[str, Any], from_side: str) -> str:
-    return manifest["secondary_region"] if from_side == "primary" else manifest["primary_region"]
-
-
-def _validate_region_rds_service(svc: Dict[str, Any], index: int) -> None:
+def _validate_region_rds_service(manifest: Dict[str, Any], svc: Dict[str, Any], index: int) -> None:
     from_side = (svc.get("from") or "").strip().lower()
     use_arc = svc.get("use_arc", True)
+    primary_region = resolve_service_primary_region(manifest, svc)
+    secondary_region = resolve_service_secondary_region(manifest, svc)
     if from_side not in ("primary", "secondary"):
         raise ValueError(f"services[{index}].from must be 'primary' or 'secondary'.")
     if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
         raise ValueError(f"services[{index}].tags is required for Aurora global database discovery.")
+    if not primary_region or not secondary_region:
+        raise ValueError(
+            f"services[{index}] requires primary_region and secondary_region at the top level or service level."
+        )
+    if primary_region == secondary_region:
+        raise ValueError(f"services[{index}] primary_region and secondary_region must be different.")
     if not isinstance(use_arc, bool):
         raise ValueError(f"services[{index}].use_arc must be true or false when provided.")
 
 
-def _validate_region_eks_service(svc: Dict[str, Any], index: int) -> None:
+def _validate_region_eks_service(manifest: Dict[str, Any], svc: Dict[str, Any], index: int) -> None:
     target = svc.get("target")
     params = svc.get("parameters")
     if not isinstance(target, dict):
@@ -1001,20 +988,9 @@ def _validate_region_eks_service(svc: Dict[str, Any], index: int) -> None:
     if not isinstance(params, dict):
         raise ValueError(f"services[{index}].parameters must be an object for eks:scale-deployment.")
 
-    region_value = str(target.get("region") or "").strip()
+    region_value = str(resolve_service_region(manifest, svc) or "").strip()
     if not region_value:
-        raise ValueError(f"services[{index}].target.region is required for eks:scale-deployment.")
-
-    primary_region = str(svc.get("__primary_region__") or "").strip()
-    secondary_region = str(svc.get("__secondary_region__") or "").strip()
-    try:
-        _resolve_region_eks_target_region(
-            region_value,
-            primary_region=primary_region,
-            secondary_region=secondary_region,
-        )
-    except ValueError as e:
-        raise ValueError(f"services[{index}].target.region {e}")
+        raise ValueError(f"services[{index}].region or top-level region is required for eks:scale-deployment.")
 
     for field in ("cluster_identifier", "namespace", "deployment_name"):
         value = str(target.get(field) or "").strip()
@@ -1042,20 +1018,6 @@ def _validate_region_dns_service(svc: Dict[str, Any], index: int) -> None:
     value = str(svc.get("value") or "").strip()
     if not value:
         raise ValueError(f"services[{index}].value is required for dns actions.")
-
-
-def _resolve_region_eks_target_region(
-    region_value: str,
-    *,
-    primary_region: str,
-    secondary_region: str,
-) -> str:
-    text = str(region_value or "").strip()
-    if text in (primary_region, secondary_region):
-        return text
-    raise ValueError(
-        f"must be '{primary_region}' or '{secondary_region}'."
-    )
 
 
 def _optional_bool(value: Any, default: bool) -> bool:

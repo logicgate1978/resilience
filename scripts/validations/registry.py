@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from utility import normalize_service_name
+from utility import normalize_service_name, resolve_service_region, resolve_service_zone
 from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
 from validations.dns import DNSValidator
@@ -63,7 +63,7 @@ def validate_manifest_services(
     manifest: Dict[str, Any],
     *,
     session,
-    region: str,
+    region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> None:
     services = manifest.get("services") or []
@@ -88,12 +88,15 @@ def validate_manifest_services(
                 f"Validation config exists for '{action_key}', but no validator is registered for service '{service_name}'."
             )
 
+        service_region = resolve_service_region(manifest, svc, default=region)
+        service_zone = resolve_service_zone(manifest, svc, default=zone)
+
         context = ValidationContext(
             manifest=manifest,
             service=svc,
             session=session,
-            region=region,
-            zone=zone,
+            region=service_region,
+            zone=service_zone,
         )
         for validation_name in validation_names:
             validator.run(validation_name, context)

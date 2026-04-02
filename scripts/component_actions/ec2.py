@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns
-from utility import normalize_service_name
+from utility import normalize_service_name, resolve_service_zone
 
 
 _ISO_DURATION_RE = re.compile(
@@ -69,7 +69,7 @@ class EC2Action(CustomComponentAction):
             svc,
             session=session,
             region=region,
-            zone=None,
+            zone=resolve_service_zone(manifest, svc),
         )
         if not arns:
             raise ValueError(f"ec2:{action} did not resolve any EC2 instances from the manifest selection.")

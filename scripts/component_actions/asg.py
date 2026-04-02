@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns
-from utility import normalize_service_name
+from utility import normalize_service_name, resolve_service_zone
 
 
 def _utc_now_iso() -> str:
@@ -99,7 +99,7 @@ class ASGScaleAction(CustomComponentAction):
             svc,
             session=session,
             region=region,
-            zone=None,
+            zone=resolve_service_zone(manifest, svc),
         )
         if not arns:
             raise ValueError("asg:scale did not resolve any Auto Scaling Groups from the manifest selection.")

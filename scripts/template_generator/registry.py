@@ -5,7 +5,13 @@ import pkgutil
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from utility import apply_site_scope_to_target, normalize_service_name, parse_tags, utc_ts
+from utility import (
+    apply_site_scope_to_target,
+    normalize_service_name,
+    parse_tags,
+    resolve_service_region,
+    utc_ts,
+)
 
 from .base import ManifestService, ServiceTemplateGenerator, build_target
 
@@ -163,20 +169,20 @@ def generate_template_payload(
     fis_role_arn: str,
     selection_mode: str = "ALL",
 ) -> Dict[str, Any]:
-    region = manifest.get("region")
-    if not region or not isinstance(region, str):
-        raise ValueError("Top-level 'region' is required (e.g. eu-west-1).")
-
-    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
-    if rtype not in ("component", "site"):
-        raise ValueError("Top-level 'resilience_test_type' must be 'component' or 'site'.")
-
-    zone = manifest.get("zone")
-    if rtype == "site":
-        if not zone or not isinstance(zone, str):
-            raise ValueError("For resilience_test_type: site, top-level 'zone' is required (e.g. eu-west-1a).")
-
     services = _parse_manifest_services(manifest)
+    regions = {
+        str(resolve_service_region(manifest, svc.config) or "").strip()
+        for svc in services
+    }
+    regions.discard("")
+    if not regions:
+        raise ValueError("FIS actions require region at the top level or service level (e.g. eu-west-1).")
+    if len(regions) > 1:
+        raise ValueError(
+            "All FIS actions in one manifest must resolve to the same AWS Region. "
+            "Use top-level region for a shared default or keep per-service region values identical."
+        )
+
     start_after_map = _resolve_start_after(services)
 
     targets: Dict[str, Any] = {}
@@ -229,7 +235,7 @@ def generate_template_payload(
             start_after=start_after_map.get(idx) or None,
         )
 
-    template_name = f"resilience-{rtype}-{utc_ts()}"
+    template_name = f"resilience-fis-{utc_ts()}"
     return {
         "clientToken": f"{template_name}-{int(time.time())}",
         "description": template_name,

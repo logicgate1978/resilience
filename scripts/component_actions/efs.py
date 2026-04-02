@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Tuple
 
 from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns
-from utility import normalize_service_name
+from utility import normalize_service_name, resolve_service_zone
 
 
 def _utc_now_iso() -> str:
@@ -74,7 +74,7 @@ class EFSFailoverAction(CustomComponentAction):
             svc,
             session=session,
             region=region,
-            zone=None,
+            zone=resolve_service_zone(manifest, svc),
         )
         if not arns:
             raise ValueError("efs:failover did not resolve any EFS file systems from the manifest selection.")

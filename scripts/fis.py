@@ -11,8 +11,7 @@ from component_actions import (
     build_custom_execution_plan,
     collect_custom_impacted_resources,
     execute_custom_plan,
-    manifest_has_custom_actions,
-    validate_component_action_mix,
+    service_uses_custom_engine,
 )
 from fis_template_generator import create_template, generate_template_payload
 from observability import parse_observability, start_observability_collectors
@@ -23,7 +22,18 @@ from region_switch import (
     validate_region_manifest,
 )
 from resource import collect_impacted_resources
-from utility import ensure_dir, load_env_file, load_manifest, parse_bool, pretty, upload_files_to_artifactory
+from utility import (
+    coerce_bool,
+    ensure_dir,
+    load_env_file,
+    load_manifest,
+    normalize_service_name,
+    parse_bool,
+    pretty,
+    resolve_service_primary_region,
+    resolve_service_region,
+    upload_files_to_artifactory,
+)
 from validations import ValidationError, validate_manifest_services
 
 from chart import generate_report  # NEW
@@ -56,6 +66,61 @@ def _env_int(env: Dict[str, str], key: str, fallback: int) -> int:
         return int(str(value).strip())
     except Exception:
         return fallback
+
+
+def _manifest_services(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
+    services = manifest.get("services") or []
+    if not isinstance(services, list) or not services:
+        raise ValueError("Top-level 'services' must be a non-empty list.")
+    return [svc for svc in services if isinstance(svc, dict)]
+
+
+def _service_engine_family(svc: Dict[str, Any]) -> str:
+    service_name = normalize_service_name(svc.get("name"))
+    action = str(svc.get("action") or "").strip().lower()
+
+    if service_name == "rds" and action in ("failover-global-db", "switchover-global-db"):
+        return "arc" if coerce_bool(svc.get("use_arc"), True) else "custom"
+
+    return "custom" if service_uses_custom_engine(svc) else "fis"
+
+
+def _resolve_manifest_engine_family(manifest: Dict[str, Any]) -> str:
+    services = _manifest_services(manifest)
+    engine_families = {_service_engine_family(svc) for svc in services}
+    if len(engine_families) > 1:
+        raise ValueError(
+            "Mixing FIS, ARC, and custom implementations in one manifest is not supported. "
+            "Keep all service actions in a manifest on the same execution engine family."
+        )
+    return next(iter(engine_families))
+
+
+def _default_session_region(manifest: Dict[str, Any], engine_family: str) -> Optional[str]:
+    services = _manifest_services(manifest)
+
+    if engine_family == "arc":
+        for svc in services:
+            if _service_engine_family(svc) == "arc":
+                region = resolve_service_primary_region(manifest, svc)
+                if region:
+                    return region
+        return None
+
+    for svc in services:
+        region = resolve_service_region(manifest, svc)
+        if region:
+            return region
+
+    for svc in services:
+        region = resolve_service_primary_region(manifest, svc)
+        if region:
+            return region
+
+    if engine_family == "custom":
+        return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+
+    return None
 
 
 def start_experiment(fis_client, template_id: str) -> str:
@@ -129,14 +194,14 @@ def main() -> int:
     args = ap.parse_args()
 
     manifest = load_manifest(args.manifest)
-    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
+    engine_family = _resolve_manifest_engine_family(manifest)
 
     ensure_dir(args.outdir)
 
-    if rtype == "region":
+    if engine_family == "arc":
         validate_region_manifest(manifest)
-        primary_region = manifest["primary_region"]
-        session = boto3.Session(region_name=primary_region)
+        control_region = _default_session_region(manifest, engine_family)
+        session = boto3.Session(region_name=control_region)
 
         resolved_targets = resolve_region_targets(manifest, session)
         impacted_resources = collect_impacted_resources(
@@ -176,7 +241,7 @@ def main() -> int:
             stop_event, obs_results, obs_threads = start_observability_collectors(
                 manifest=manifest,
                 session=session,
-                region=primary_region,
+                region=control_region,
                 outdir=args.outdir,
                 impacted_resources=[],
             )
@@ -244,22 +309,17 @@ def main() -> int:
 
         return 0
 
-    region = manifest.get("region")
-    if not region and manifest_has_custom_actions(manifest):
-        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
-    if not region:
-        raise ValueError("manifest.yml must include top-level region unless the manifest is custom-only and uses a global control plane such as Route 53 DNS.")
+    region = _default_session_region(manifest, engine_family)
+    if not region and engine_family == "fis":
+        raise ValueError("FIS actions require region at the top level or service level.")
 
     session = boto3.Session(region_name=region)
-    zone = manifest.get("zone") if rtype == "site" else None
     try:
         validate_manifest_services(
             manifest,
             session=session,
             region=region,
-            zone=zone,
         )
-        validate_component_action_mix(manifest)
     except ValidationError as e:
         print(f"[ERROR] {e}")
         return 1
@@ -267,7 +327,7 @@ def main() -> int:
         print(f"[ERROR] {e}")
         return 1
 
-    if manifest_has_custom_actions(manifest):
+    if engine_family == "custom":
         execution_plan = build_custom_execution_plan(
             manifest,
             session=session,

@@ -4,6 +4,8 @@ from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Dict, List, Optional, Type
 
+from utility import resolve_service_zone
+
 
 @dataclass
 class ManifestService:
@@ -94,9 +96,8 @@ class ServiceTemplateGenerator(ABC):
         resource_arns: Optional[List[str]],
         apply_site_scope_to_target_fn,
     ) -> None:
-        rtype = (manifest.get("resilience_test_type") or "").strip().lower()
-        zone = manifest.get("zone")
-        if rtype == "site" and resource_arns is None and isinstance(zone, str):
+        zone = resolve_service_zone(manifest, svc.config)
+        if resource_arns is None and isinstance(zone, str):
             apply_site_scope_to_target_fn(target, resource_type, zone)
 
     def build_action_parameters(

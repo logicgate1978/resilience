@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from utility import resolve_iam_role_arns_from_names
+from utility import resolve_iam_role_arns_from_names, resolve_service_zone
 
 from .base import ManifestService, ServiceTemplateGenerator
 
@@ -69,9 +69,9 @@ class EC2TemplateGenerator(ServiceTemplateGenerator):
         if action_id == "aws:ec2:api-insufficient-instance-capacity-error":
             if not svc.duration:
                 raise ValueError(f"{svc.name}:{svc.action} requires services[].duration (e.g. PT30M).")
-            zone = manifest.get("zone")
+            zone = resolve_service_zone(manifest, svc.config)
             if not zone or not isinstance(zone, str):
-                raise ValueError(f"{svc.name}:{svc.action} requires top-level 'zone' (e.g. eu-west-1a).")
+                raise ValueError(f"{svc.name}:{svc.action} requires zone at the top level or service level (e.g. eu-west-1a).")
             params["duration"] = svc.duration
             params["availabilityZoneIdentifiers"] = zone
             params["percentage"] = "100"

@@ -1,4 +1,3 @@
-resilience_test_type: component
 region: ap-southeast-1
 # This manifest is designed for EKS pod fault testing.
 # Enable one EKS action block at a time unless you intentionally want parallel faults.

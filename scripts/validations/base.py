@@ -13,7 +13,7 @@ class ValidationContext:
     manifest: Dict[str, Any]
     service: Dict[str, Any]
     session: Any
-    region: str
+    region: Optional[str]
     zone: Optional[str] = None
     _selected_resource_arns: Optional[List[str]] = field(default=None, init=False, repr=False)
 

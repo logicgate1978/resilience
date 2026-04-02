@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from utility import resolve_service_zone
+
 from .base import ManifestService, ServiceTemplateGenerator
 
 
@@ -26,9 +28,9 @@ class ASGTemplateGenerator(ServiceTemplateGenerator):
 
         if not svc.duration:
             raise ValueError(f"{svc.name}:{svc.action} requires services[].duration (e.g. PT30M).")
-        zone = manifest.get("zone")
+        zone = resolve_service_zone(manifest, svc.config)
         if not zone or not isinstance(zone, str):
-            raise ValueError(f"{svc.name}:{svc.action} requires top-level 'zone' (e.g. eu-west-1a).")
+            raise ValueError(f"{svc.name}:{svc.action} requires zone at the top level or service level (e.g. eu-west-1a).")
 
         return {
             "duration": svc.duration,

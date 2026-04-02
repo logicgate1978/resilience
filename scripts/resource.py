@@ -3,7 +3,16 @@ import boto3
 from typing import Any, Dict, List, Optional
 
 from dns_utils import normalize_record_name, parse_weight_assignments
-from utility import get_account_id, normalize_service_name, parse_tags, resolve_iam_role_arns_from_names
+from utility import (
+    get_account_id,
+    normalize_service_name,
+    parse_tags,
+    resolve_iam_role_arns_from_names,
+    resolve_service_primary_region,
+    resolve_service_region,
+    resolve_service_secondary_region,
+    resolve_service_zone,
+)
 
 
 def _tags_match(expected: Dict[str, str], actual: Dict[str, str]) -> bool:
@@ -354,30 +363,13 @@ def discover_rds_global_clusters(
     if session is None:
         session = boto3.Session()
 
-    primary_region = manifest.get("primary_region")
-    secondary_region = manifest.get("secondary_region")
-    if not primary_region or not secondary_region:
-        raise ValueError("region resilience tests require top-level primary_region and secondary_region.")
-
     services = manifest.get("services") or []
     if not isinstance(services, list):
         return []
 
-    primary_rds = session.client("rds", region_name=primary_region)
-    region_clients = {
-        primary_region: primary_rds,
-        secondary_region: session.client("rds", region_name=secondary_region),
-    }
-
-    global_clusters_by_identifier: Dict[str, Dict[str, Any]] = {}
-    paginator = primary_rds.get_paginator("describe_global_clusters")
-    for page in paginator.paginate():
-        for global_cluster in page.get("GlobalClusters", []):
-            identifier = global_cluster.get("GlobalClusterIdentifier")
-            if identifier:
-                global_clusters_by_identifier[identifier] = global_cluster
-
     resolved: List[Dict[str, Any]] = []
+    client_cache: Dict[str, Any] = {}
+    global_clusters_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     for svc in services:
         if not isinstance(svc, dict):
@@ -387,6 +379,38 @@ def discover_rds_global_clusters(
         action = (svc.get("action") or "").strip().lower()
         if name != "rds" or action not in ("failover-global-db", "switchover-global-db"):
             continue
+
+        primary_region = resolve_service_primary_region(manifest, svc)
+        secondary_region = resolve_service_secondary_region(manifest, svc)
+        if not primary_region or not secondary_region:
+            raise ValueError(
+                f"{name}:{action} requires primary_region and secondary_region at the top level or service level."
+            )
+        if primary_region == secondary_region:
+            raise ValueError("primary_region and secondary_region must be different.")
+
+        if primary_region not in client_cache:
+            client_cache[primary_region] = session.client("rds", region_name=primary_region)
+        if secondary_region not in client_cache:
+            client_cache[secondary_region] = session.client("rds", region_name=secondary_region)
+
+        primary_rds = client_cache[primary_region]
+        region_clients = {
+            primary_region: primary_rds,
+            secondary_region: client_cache[secondary_region],
+        }
+
+        if primary_region not in global_clusters_cache:
+            global_clusters_by_identifier: Dict[str, Dict[str, Any]] = {}
+            paginator = primary_rds.get_paginator("describe_global_clusters")
+            for page in paginator.paginate():
+                for global_cluster in page.get("GlobalClusters", []):
+                    identifier = global_cluster.get("GlobalClusterIdentifier")
+                    if identifier:
+                        global_clusters_by_identifier[identifier] = global_cluster
+            global_clusters_cache[primary_region] = global_clusters_by_identifier
+        else:
+            global_clusters_by_identifier = global_clusters_cache[primary_region]
 
         tags = parse_tags(svc.get("tags"))
         matches: List[Dict[str, Any]] = []
@@ -467,89 +491,9 @@ def collect_impacted_resources(
 ) -> List[Dict[str, str]]:
     if session is None:
         session = boto3.Session(region_name=region)
-
-    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
     services = manifest.get("services") or []
     if not isinstance(services, list):
         return []
-
-    if rtype == "region":
-        out: List[Dict[str, str]] = []
-        primary_region = manifest.get("primary_region")
-        secondary_region = manifest.get("secondary_region")
-        for svc in services:
-            if not isinstance(svc, dict):
-                continue
-            name = normalize_service_name(svc.get("name"))
-            action = (svc.get("action") or "").strip().lower()
-            if name == "rds" and action in ("failover-global-db", "switchover-global-db"):
-                for item in discover_rds_global_clusters(manifest={"services": [svc], "primary_region": primary_region, "secondary_region": secondary_region, "resilience_test_type": "region"}, session=session):
-                    if item.get("global_cluster_arn"):
-                        out.append(
-                            {
-                                "service": str(item.get("service") or ""),
-                                "arn": str(item.get("global_cluster_arn") or ""),
-                                "selection_mode": str(item.get("selection_mode") or "ALL"),
-                            }
-                        )
-                    for cluster_arn in (item.get("member_cluster_arns") or {}).values():
-                        out.append(
-                            {
-                                "service": str(item.get("service") or ""),
-                                "arn": str(cluster_arn or ""),
-                                "selection_mode": str(item.get("selection_mode") or "ALL"),
-                            }
-                        )
-            elif name == "eks" and action == "scale-deployment":
-                target = svc.get("target") or {}
-                side = str(target.get("region") or "").strip().lower()
-                actual_region = primary_region if side == "primary" else secondary_region
-                cluster_identifier = str(target.get("cluster_identifier") or "").strip()
-                namespace = str(target.get("namespace") or "").strip()
-                deployment_name = str(target.get("deployment_name") or "").strip()
-                if cluster_identifier and namespace and deployment_name and actual_region:
-                    out.append(
-                        {
-                            "service": f"{name}:{action}",
-                            "arn": f"eks://{actual_region}/{cluster_identifier}/{namespace}/deployment/{deployment_name}",
-                            "selection_mode": "CUSTOM",
-                        }
-                    )
-            elif name == "dns" and action in ("set-value", "set-weight"):
-                target = svc.get("target") or {}
-                hosted_zone = str(target.get("hosted_zone") or "").strip()
-                record_name = normalize_record_name(str(target.get("record_name") or "").strip())
-                record_type = str(target.get("record_type") or "").strip().upper()
-                if not hosted_zone or not record_name or not record_type:
-                    continue
-                if action == "set-value":
-                    out.append(
-                        {
-                            "service": f"{name}:{action}",
-                            "arn": _dns_record_label(hosted_zone, record_name, record_type),
-                            "selection_mode": "CUSTOM",
-                        }
-                    )
-                else:
-                    try:
-                        assignments = parse_weight_assignments(svc.get("value"))
-                    except Exception:
-                        assignments = {}
-                    for set_identifier in assignments:
-                        out.append(
-                            {
-                                "service": f"{name}:{action}",
-                                "arn": _dns_record_label(hosted_zone, record_name, record_type, set_identifier),
-                                "selection_mode": "CUSTOM",
-                            }
-                        )
-        return out
-
-    manifest_region = region or manifest.get("region")
-    if not manifest_region:
-        raise ValueError("manifest.yml must include top-level region")
-
-    zone = manifest.get("zone") if rtype == "site" else None
 
     out: List[Dict[str, str]] = []
 
@@ -559,13 +503,85 @@ def collect_impacted_resources(
 
         name = normalize_service_name(svc.get("name"))
         action = (svc.get("action") or "").strip().lower()
+        if name == "rds" and action in ("failover-global-db", "switchover-global-db"):
+            scoped_manifest = dict(manifest)
+            scoped_manifest["services"] = [svc]
+            for item in discover_rds_global_clusters(manifest=scoped_manifest, session=session):
+                if item.get("global_cluster_arn"):
+                    out.append(
+                        {
+                            "service": str(item.get("service") or ""),
+                            "arn": str(item.get("global_cluster_arn") or ""),
+                            "selection_mode": str(item.get("selection_mode") or "ALL"),
+                        }
+                    )
+                for cluster_arn in (item.get("member_cluster_arns") or {}).values():
+                    out.append(
+                        {
+                            "service": str(item.get("service") or ""),
+                            "arn": str(cluster_arn or ""),
+                            "selection_mode": str(item.get("selection_mode") or "ALL"),
+                        }
+                    )
+            continue
+
+        if name == "eks" and action == "scale-deployment":
+            target = svc.get("target") or {}
+            actual_region = resolve_service_region(manifest, svc, default=region)
+            cluster_identifier = str(target.get("cluster_identifier") or "").strip()
+            namespace = str(target.get("namespace") or "").strip()
+            deployment_name = str(target.get("deployment_name") or "").strip()
+            if cluster_identifier and namespace and deployment_name and actual_region:
+                out.append(
+                    {
+                        "service": f"{name}:{action}",
+                        "arn": f"eks://{actual_region}/{cluster_identifier}/{namespace}/deployment/{deployment_name}",
+                        "selection_mode": "CUSTOM",
+                    }
+                )
+            continue
+
+        if name == "dns" and action in ("set-value", "set-weight"):
+            target = svc.get("target") or {}
+            hosted_zone = str(target.get("hosted_zone") or "").strip()
+            record_name = normalize_record_name(str(target.get("record_name") or "").strip())
+            record_type = str(target.get("record_type") or "").strip().upper()
+            if not hosted_zone or not record_name or not record_type:
+                continue
+            if action == "set-value":
+                out.append(
+                    {
+                        "service": f"{name}:{action}",
+                        "arn": _dns_record_label(hosted_zone, record_name, record_type),
+                        "selection_mode": "CUSTOM",
+                    }
+                )
+            else:
+                try:
+                    assignments = parse_weight_assignments(svc.get("value"))
+                except Exception:
+                    assignments = {}
+                for set_identifier in assignments:
+                    out.append(
+                        {
+                            "service": f"{name}:{action}",
+                            "arn": _dns_record_label(hosted_zone, record_name, record_type, set_identifier),
+                            "selection_mode": "CUSTOM",
+                        }
+                    )
+            continue
+
         selection_mode = _selection_mode_label(svc.get("instance_count"))
         service_label = _service_label(name, action)
+        service_region = resolve_service_region(manifest, svc, default=region)
+        if not service_region:
+            raise ValueError(f"{service_label} requires region at the top level or service level.")
+        service_zone = resolve_service_zone(manifest, svc)
         arns = collect_service_resource_arns(
             svc,
             session=session,
-            region=manifest_region,
-            zone=zone,
+            region=service_region,
+            zone=service_zone,
         )
 
         for arn in arns:
