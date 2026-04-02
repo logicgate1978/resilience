@@ -59,6 +59,38 @@ def load_manifest(path: str) -> Dict[str, Any]:
     return data
 
 
+def load_env_file(path: str) -> Dict[str, str]:
+    if not path or not os.path.exists(path):
+        return {}
+
+    out: Dict[str, str] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            key, value = raw.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key:
+                continue
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            out[key] = value
+    return out
+
+
+def parse_bool(value: Optional[str], default: bool = False) -> bool:
+    if value is None:
+        return default
+    v = str(value).strip().lower()
+    if v in ("1", "true", "yes", "y", "on"):
+        return True
+    if v in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
 def get_account_id(sts_client) -> str:
     return sts_client.get_caller_identity()["Account"]
 

@@ -1,0 +1,46 @@
+actions:
+  - action: asg:scale
+    validations:
+      - verify_resource_existence
+      - verify_scale_values
+  - action: dns:set-value
+    validations:
+      - verify_record_exists
+      - verify_value_present
+      - verify_simple_record_target
+  - action: dns:set-weight
+    validations:
+      - verify_record_exists
+      - verify_value_present
+      - verify_weight_targets
+  - action: efs:failover
+    validations:
+      - verify_resource_existence
+      - verify_replication_configuration_exists
+  - action: ec2:terminate
+    validations:
+      - verify_resource_existence
+  - action: ec2:reboot
+    validations:
+      - verify_resource_existence
+  - action: ec2:stop
+    validations:
+      - verify_resource_existence
+  - action: rds:reboot
+    validations:
+      - verify_resource_existence
+      - verify_replica
+  - action: rds:failover
+    validations:
+      - verify_resource_existence
+      - verify_replica
+  - action: eks:scale-deployment
+    validations:
+      - verify_deployment_existence
+      - verify_replicas_value
+  - action: s3:pause-replication
+    validations:
+      - verify_resource_existence
+  - action: s3:pause-relication
+    validations:
+      - verify_resource_existence

@@ -7,12 +7,55 @@ from typing import Any, Dict, List, Optional
 import boto3
 import botocore
 
+from component_actions import (
+    build_custom_execution_plan,
+    collect_custom_impacted_resources,
+    execute_custom_plan,
+    manifest_has_custom_actions,
+    validate_component_action_mix,
+)
 from fis_template_generator import create_template, generate_template_payload
 from observability import parse_observability, start_observability_collectors
+from region_switch import (
+    build_execution_plan,
+    execute_region_plan,
+    resolve_region_targets,
+    validate_region_manifest,
+)
 from resource import collect_impacted_resources
-from utility import ensure_dir, load_manifest, pretty, upload_files_to_artifactory
+from utility import ensure_dir, load_env_file, load_manifest, parse_bool, pretty, upload_files_to_artifactory
+from validations import ValidationError, validate_manifest_services
 
 from chart import generate_report  # NEW
+
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+ENV_PATH = os.path.join(SCRIPT_DIR, ".env")
+
+
+def _env_value(env: Dict[str, str], key: str, fallback: str) -> str:
+    value = env.get(key)
+    if value is None or str(value).strip() == "":
+        return fallback
+    return str(value).strip()
+
+
+def _env_path(env: Dict[str, str], key: str, fallback: str) -> str:
+    value = _env_value(env, key, fallback)
+    if os.path.isabs(value):
+        return value
+    return os.path.normpath(os.path.join(REPO_ROOT, value))
+
+
+def _env_int(env: Dict[str, str], key: str, fallback: int) -> int:
+    value = env.get(key)
+    if value is None or str(value).strip() == "":
+        return fallback
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return fallback
 
 
 def start_experiment(fis_client, template_id: str) -> str:
@@ -39,7 +82,7 @@ def wait_for_completion(
             return exp
         if time.time() - start > timeout_seconds:
             raise TimeoutError(f"Experiment {experiment_id} timed out after {timeout_seconds}s (last={status}).")
-        print(f"[INFO] Experiment {experiment_id} status={status} elapsed={int(time.time()-start)}s")
+        print(f"[INFO] FIS is running: experimentId={experiment_id} status={status} elapsed={int(time.time()-start)}s")
         time.sleep(poll_seconds)
 
 
@@ -66,23 +109,265 @@ def summarize_experiment(exp: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _get_report_filename(base_name: str) -> str:
+    report_date = datetime.utcnow().strftime("%Y%m%d")
+    return f"report_{base_name}_{report_date}.html"
+
+
 def main() -> int:
+    env_defaults = load_env_file(ENV_PATH)
+
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default='../manifests/component-1.yml', help="Path to manifest.yml")
-    ap.add_argument("--fis-role-arn", default='arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063', help="FIS IAM role ARN (required unless --dry-run)")
-    ap.add_argument("--outdir", default="fis_out", help="Output directory for template/results JSON/CSVs")
+    ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "geo-1.yml")), help="Path to manifest.yml")
+    ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", 'arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063'), help="FIS IAM role ARN (required unless --dry-run)")
+    ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", "arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole"), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
+    ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
-    ap.add_argument("--poll-seconds", type=int, default=10, help="Polling interval while waiting for experiment")
-    ap.add_argument("--timeout-seconds", type=int, default=3600, help="Timeout per experiment in seconds")
-    ap.add_argument("--upload-artifactory", default=False, action="store_true", help="Upload generated HTML report to Artifactory")
+    ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
+    ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 3600), help="Timeout per experiment in seconds")
+    ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
 
     manifest = load_manifest(args.manifest)
-    region = manifest.get("region")
-    if not region:
-        raise ValueError("manifest.yml must include top-level region")
+    rtype = (manifest.get("resilience_test_type") or "").strip().lower()
 
     ensure_dir(args.outdir)
+
+    if rtype == "region":
+        validate_region_manifest(manifest)
+        primary_region = manifest["primary_region"]
+        session = boto3.Session(region_name=primary_region)
+
+        resolved_targets = resolve_region_targets(manifest, session)
+        impacted_resources = collect_impacted_resources(
+            manifest=manifest,
+            session=session,
+            region=None,
+        )
+        impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
+        with open(impacted_resources_path, "w", encoding="utf-8") as f:
+            f.write(pretty({"impacted_resources": impacted_resources}))
+        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+
+        arc_role_arn = args.arc_role_arn or ("REPLACE_ME" if args.dry_run else "")
+        execution_plan = build_execution_plan(
+            manifest=manifest,
+            execution_role_arn=arc_role_arn,
+            resolved_targets=resolved_targets,
+        )
+        plan_name = execution_plan["name"]
+        report_filename = _get_report_filename(plan_name)
+
+        execution_plan_path = os.path.join(args.outdir, f"region_execution_plan_{plan_name}.json")
+        with open(execution_plan_path, "w", encoding="utf-8") as f:
+            f.write(pretty(execution_plan))
+        print(f"[OK] Wrote region execution plan JSON: {execution_plan_path}")
+
+        if args.dry_run:
+            print("[INFO] Dry-run enabled: skipping create/execute.")
+            return 0
+
+        stop_event: Optional[Any] = None
+        obs_results: Optional[Dict[str, Any]] = None
+        obs_threads: List[Any] = []
+        report_path: Optional[str] = None
+
+        try:
+            stop_event, obs_results, obs_threads = start_observability_collectors(
+                manifest=manifest,
+                session=session,
+                region=primary_region,
+                outdir=args.outdir,
+                impacted_resources=[],
+            )
+
+            obs_cfg = parse_observability(manifest)
+            start_before_min = int(obs_cfg.get("start_before") or 0)
+            stop_after_min = int(obs_cfg.get("stop_after") or 0)
+
+            if start_before_min > 0:
+                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting region switch...")
+                time.sleep(start_before_min * 60)
+
+            summary = execute_region_plan(
+                session=session,
+                execution_plan=execution_plan,
+                poll_seconds=args.poll_seconds,
+                timeout_seconds=args.timeout_seconds,
+            )
+
+            if stop_after_min > 0:
+                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+                time.sleep(stop_after_min * 60)
+
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                t.join(timeout=5)
+
+            if obs_results is not None:
+                summary["observability"] = obs_results
+
+            result_path = os.path.join(args.outdir, f"result_{plan_name}.json")
+            with open(result_path, "w", encoding="utf-8") as f:
+                f.write(pretty(summary))
+            print(f"[OK] Wrote result summary JSON: {result_path}")
+
+            print("[RESULT] Summary:")
+            print(pretty(summary))
+
+            report_path = generate_report(args.outdir, html_filename=report_filename)
+            print(f"[OK] Wrote HTML report: {report_path}")
+
+            if args.upload_artifactory and report_path:
+                upload_files_to_artifactory([report_path])
+
+        except botocore.exceptions.ClientError as e:
+            raise RuntimeError(f"AWS API error: {e}") from e
+        finally:
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                try:
+                    t.join(timeout=2)
+                except Exception:
+                    pass
+
+            if report_path is None:
+                try:
+                    rp = generate_report(args.outdir, html_filename=report_filename)
+                    print(f"[OK] Wrote HTML report: {rp}")
+                    if args.upload_artifactory:
+                        upload_files_to_artifactory([rp])
+                except Exception:
+                    pass
+
+        return 0
+
+    region = manifest.get("region")
+    if not region and manifest_has_custom_actions(manifest):
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+    if not region:
+        raise ValueError("manifest.yml must include top-level region unless the manifest is custom-only and uses a global control plane such as Route 53 DNS.")
+
+    session = boto3.Session(region_name=region)
+    zone = manifest.get("zone") if rtype == "site" else None
+    try:
+        validate_manifest_services(
+            manifest,
+            session=session,
+            region=region,
+            zone=zone,
+        )
+        validate_component_action_mix(manifest)
+    except ValidationError as e:
+        print(f"[ERROR] {e}")
+        return 1
+    except ValueError as e:
+        print(f"[ERROR] {e}")
+        return 1
+
+    if manifest_has_custom_actions(manifest):
+        execution_plan = build_custom_execution_plan(
+            manifest,
+            session=session,
+            region=region,
+            default_timeout_seconds=args.timeout_seconds,
+        )
+        plan_name = execution_plan["name"]
+        report_filename = _get_report_filename(plan_name)
+
+        execution_plan_path = os.path.join(args.outdir, f"custom_execution_plan_{plan_name}.json")
+        with open(execution_plan_path, "w", encoding="utf-8") as f:
+            f.write(pretty(execution_plan))
+        print(f"[OK] Wrote custom execution plan JSON: {execution_plan_path}")
+
+        impacted_resources = collect_custom_impacted_resources(execution_plan)
+        impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
+        with open(impacted_resources_path, "w", encoding="utf-8") as f:
+            f.write(pretty({"impacted_resources": impacted_resources}))
+        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+
+        if args.dry_run:
+            print("[INFO] Dry-run enabled: skipping create/execute.")
+            return 0
+
+        stop_event: Optional[Any] = None
+        obs_results: Optional[Dict[str, Any]] = None
+        obs_threads: List[Any] = []
+        report_path: Optional[str] = None
+
+        try:
+            stop_event, obs_results, obs_threads = start_observability_collectors(
+                manifest=manifest,
+                session=session,
+                region=region,
+                outdir=args.outdir,
+                impacted_resources=impacted_resources,
+            )
+
+            obs_cfg = parse_observability(manifest)
+            start_before_min = int(obs_cfg.get("start_before") or 0)
+            stop_after_min = int(obs_cfg.get("stop_after") or 0)
+
+            if start_before_min > 0:
+                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting custom action...")
+                time.sleep(start_before_min * 60)
+
+            summary = execute_custom_plan(
+                session=session,
+                execution_plan=execution_plan,
+                poll_seconds=args.poll_seconds,
+                timeout_seconds=args.timeout_seconds,
+            )
+
+            if stop_after_min > 0:
+                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+                time.sleep(stop_after_min * 60)
+
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                t.join(timeout=5)
+
+            if obs_results is not None:
+                summary["observability"] = obs_results
+
+            result_path = os.path.join(args.outdir, f"result_{plan_name}.json")
+            with open(result_path, "w", encoding="utf-8") as f:
+                f.write(pretty(summary))
+            print(f"[OK] Wrote result summary JSON: {result_path}")
+
+            print("[RESULT] Summary:")
+            print(pretty(summary))
+
+            report_path = generate_report(args.outdir, html_filename=report_filename)
+            print(f"[OK] Wrote HTML report: {report_path}")
+
+            if args.upload_artifactory and report_path:
+                upload_files_to_artifactory([report_path])
+
+        except botocore.exceptions.ClientError as e:
+            raise RuntimeError(f"AWS API error: {e}") from e
+        finally:
+            if stop_event is not None:
+                stop_event.set()
+            for t in obs_threads:
+                try:
+                    t.join(timeout=2)
+                except Exception:
+                    pass
+
+            if report_path is None:
+                try:
+                    rp = generate_report(args.outdir, html_filename=report_filename)
+                    print(f"[OK] Wrote HTML report: {rp}")
+                    if args.upload_artifactory:
+                        upload_files_to_artifactory([rp])
+                except Exception:
+                    pass
+
+        return 0
 
     if args.dry_run:
         fis_role_arn = args.fis_role_arn or "REPLACE_ME"
@@ -94,15 +379,12 @@ def main() -> int:
     payload = generate_template_payload(manifest, fis_role_arn=fis_role_arn, selection_mode="ALL")
 
     template_name = payload["description"]
-    report_date = datetime.utcnow().strftime("%Y%m%d")
-    report_filename = f"report_{template_name}_{report_date}.html"
+    report_filename = _get_report_filename(template_name)
 
     template_json_path = os.path.join(args.outdir, f"template_payload_{template_name}.json")
     with open(template_json_path, "w", encoding="utf-8") as f:
         f.write(pretty(payload))
     print(f"[OK] Wrote template payload JSON: {template_json_path}")
-
-    session = boto3.Session(region_name=region)
 
     impacted_resources = collect_impacted_resources(
         manifest=manifest,
@@ -146,6 +428,7 @@ def main() -> int:
             print(f"[INFO] start_before={start_before_min} minutes: waiting before starting experiment...")
             time.sleep(start_before_min * 60)
 
+        print("[INFO] FIS is running...")
         exp_id = start_experiment(fis_client, template_id)
         print(f"[OK] Started experimentId: {exp_id}")
 
