@@ -443,8 +443,8 @@ When `use_arc = true`, the code:
 
 1. creates an ARC plan with:
    - `recoveryApproach = activePassive`
-   - one workflow
-   - one Aurora Global Database step
+   - one `activate` workflow for each Region in the plan
+   - one Aurora Global Database step in each workflow
 2. starts execution with:
    - `activate`
    - `ungraceful` for `failover-global-db`

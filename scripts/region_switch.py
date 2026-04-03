@@ -425,6 +425,26 @@ def _build_arc_execution_item(
     if action_cfg["mode"] == "ungraceful":
         global_aurora_config["ungraceful"] = {"ungraceful": "failover"}
 
+    workflows = []
+    for workflow_region in (primary_region, secondary_region):
+        workflows.append(
+            {
+                "workflowTargetAction": "activate",
+                "workflowTargetRegion": workflow_region,
+                "workflowDescription": f"{plan_description} targeting {workflow_region}",
+                "steps": [
+                    {
+                        "name": f"{step_name}-{workflow_region}".replace("_", "-"),
+                        "description": action_cfg["description"],
+                        "executionBlockType": "AuroraGlobalDatabase",
+                        "executionBlockConfiguration": {
+                            "globalAuroraConfig": global_aurora_config,
+                        },
+                    }
+                ],
+            }
+        )
+
     return {
         "name": step_name,
         "engine": "arc",
@@ -440,23 +460,7 @@ def _build_arc_execution_item(
             "regions": [primary_region, secondary_region],
             "recoveryApproach": "activePassive",
             "primaryRegion": primary_region,
-            "workflows": [
-                {
-                    "workflowTargetAction": "activate",
-                    "workflowTargetRegion": target_region,
-                    "workflowDescription": plan_description,
-                    "steps": [
-                        {
-                            "name": step_name,
-                            "description": action_cfg["description"],
-                            "executionBlockType": "AuroraGlobalDatabase",
-                            "executionBlockConfiguration": {
-                                "globalAuroraConfig": global_aurora_config,
-                            },
-                        }
-                    ],
-                }
-            ],
+            "workflows": workflows,
             "tags": {
                 "managed-by": "fis.py",
                 "service": "rds",
