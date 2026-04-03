@@ -14,7 +14,7 @@ services:
 - name: ec2
   action: terminate
   tags: Name=test
-  start_after: ec2:stop
+  start_after: common:wait
 
 - name: common
   action: wait
