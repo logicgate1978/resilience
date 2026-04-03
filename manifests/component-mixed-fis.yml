@@ -3,7 +3,7 @@ region: ap-southeast-1
 services:
 - name: ec2
   action: stop
-  tags: Name=test
+  tags: Name=resilience-asg-web-instance
   duration: PT2M
 
 - name: common
@@ -13,7 +13,7 @@ services:
 
 - name: ec2
   action: terminate
-  tags: Name=test
+  tags: Name=resilience-asg-web-instance
   start_after: common:wait
 
 - name: common
