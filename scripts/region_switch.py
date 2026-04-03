@@ -977,8 +977,12 @@ def _validate_region_rds_service(manifest: Dict[str, Any], svc: Dict[str, Any], 
     secondary_region = resolve_service_secondary_region(manifest, svc)
     from_side = _resolve_global_db_from_side(svc.get("from"), primary_region, secondary_region)
     use_arc = svc.get("use_arc", True)
-    if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
-        raise ValueError(f"services[{index}].tags is required for Aurora global database discovery.")
+    tags = str(svc.get("tags") or "").strip()
+    identifier = str(svc.get("identifier") or "").strip()
+    if not tags and not identifier:
+        raise ValueError(
+            f"services[{index}] requires at least one Aurora global database selector: tags or identifier."
+        )
     if not primary_region or not secondary_region:
         raise ValueError(
             f"services[{index}] requires primary_region and secondary_region at the top level or service level."
