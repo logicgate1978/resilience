@@ -61,10 +61,9 @@ class EC2TemplateGenerator(ServiceTemplateGenerator):
         params: Dict[str, str] = {}
 
         if action_id == "aws:ec2:stop-instances":
-            if not svc.duration:
-                raise ValueError("ec2:stop requires services[].duration (used as startInstancesAfterDuration, e.g. PT30M).")
-            params["startInstancesAfterDuration"] = svc.duration
-            params["completeIfInstancesTerminated"] = "true"
+            if svc.duration and str(svc.duration).strip():
+                params["startInstancesAfterDuration"] = str(svc.duration).strip()
+                params["completeIfInstancesTerminated"] = "true"
 
         if action_id == "aws:ec2:api-insufficient-instance-capacity-error":
             if not svc.duration:

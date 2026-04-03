@@ -99,16 +99,17 @@ class EC2Action(CustomComponentAction):
         description = f"{action.title()} {len(instance_ids)} EC2 instance(s)"
         if action == "stop":
             duration = svc.get("duration")
-            if duration is None or str(duration).strip() == "":
-                raise ValueError("ec2:stop requires services[].duration (for example PT2M).")
-            duration_seconds = _parse_iso_duration_seconds(duration)
-            parameters["duration"] = str(duration).strip()
-            parameters["durationSeconds"] = duration_seconds
-            parameters["timeoutSeconds"] = max(duration_seconds, int(default_timeout_seconds))
-            description = (
-                f"Stop {len(instance_ids)} EC2 instance(s), wait {parameters['duration']}, "
-                "then start them again"
-            )
+            if duration is not None and str(duration).strip() != "":
+                duration_seconds = _parse_iso_duration_seconds(duration)
+                parameters["duration"] = str(duration).strip()
+                parameters["durationSeconds"] = duration_seconds
+                parameters["timeoutSeconds"] = max(duration_seconds, int(default_timeout_seconds))
+                description = (
+                    f"Stop {len(instance_ids)} EC2 instance(s), wait {parameters['duration']}, "
+                    "then start them again"
+                )
+            else:
+                description = f"Stop {len(instance_ids)} EC2 instance(s)"
 
         return {
             "name": f"a_ec2_{action}_{index}",
@@ -156,13 +157,14 @@ class EC2Action(CustomComponentAction):
                     InstanceIds=instance_ids,
                     WaiterConfig={"Delay": 15, "MaxAttempts": max(1, effective_timeout_seconds // 15)},
                 )
-                time.sleep(int(params["durationSeconds"]))
-                ec2.start_instances(InstanceIds=instance_ids)
-                running_waiter = ec2.get_waiter("instance_running")
-                running_waiter.wait(
-                    InstanceIds=instance_ids,
-                    WaiterConfig={"Delay": 15, "MaxAttempts": max(1, effective_timeout_seconds // 15)},
-                )
+                if "durationSeconds" in params:
+                    time.sleep(int(params["durationSeconds"]))
+                    ec2.start_instances(InstanceIds=instance_ids)
+                    running_waiter = ec2.get_waiter("instance_running")
+                    running_waiter.wait(
+                        InstanceIds=instance_ids,
+                        WaiterConfig={"Delay": 15, "MaxAttempts": max(1, effective_timeout_seconds // 15)},
+                    )
             elif action == "reboot":
                 ec2.reboot_instances(InstanceIds=instance_ids)
                 status_waiter = ec2.get_waiter("instance_status_ok")

@@ -194,7 +194,7 @@ Responsibilities:
     <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td></tr>
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
-    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. In the boto3 path, <code>service.duration</code> is required and controls when the instances are started again.</td><td><code>aws:ec2:stop-instances</code></td></tr>
+    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. If <code>service.duration</code> is provided, the framework maps it to auto-restart behavior; if it is omitted, the instances remain stopped.</td><td><code>aws:ec2:stop-instances</code></td></tr>
     <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
     <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
     <tr><th colspan="3" align="left">RDS</th></tr>
@@ -252,7 +252,7 @@ Responsibilities:
     <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
     <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags.</td></tr>
     <tr><td><code>service.value</code></td><td>Yes for some actions</td><td><code>dns:set-value</code>, <code>dns:set-weight</code></td><td>Action-specific value payload. For <code>dns:set-value</code>, this is the target record value. For <code>dns:set-weight</code>, this is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
-    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>. For <code>ec2:stop</code> with <code>service.use_fis: false</code>, it controls how long instances remain stopped before the framework starts them again.</td></tr>
+    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>. For <code>ec2:stop</code>, it is optional and only controls when the framework starts the instances again after stopping them.</td></tr>
     <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
     <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
     <tr><td><code>service.iam_role_arns</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Explicit IAM role ARNs to target instead of resolving <code>iam_roles</code>.</td></tr>
@@ -562,9 +562,12 @@ Current behavior:
 - `ec2:stop`
   - stops the selected instances
   - waits until they are fully stopped
-  - sleeps for `service.duration`
-  - starts the instances again
-  - waits until they are running
+  - if `service.duration` is present:
+    - sleeps for `service.duration`
+    - starts the instances again
+    - waits until they are running
+  - if `service.duration` is absent:
+    - leaves the instances stopped
 - `ec2:reboot`
   - reboots the selected instances
   - waits until EC2 instance status checks return `ok`
