@@ -6,7 +6,7 @@ DEFAULT_PRIMARY_REGION="ap-southeast-1"
 DEFAULT_SECONDARY_REGION="ap-southeast-2"
 DEFAULT_NAME="resilience-aurora-global"
 DEFAULT_ENGINE="aurora-mysql"
-DEFAULT_INSTANCE_CLASS="db.t4g.medium"
+DEFAULT_INSTANCE_CLASS="db.r6g.large"
 DEFAULT_MASTER_USERNAME="dbadmin"
 DEFAULT_DATABASE_NAME="appdb"
 DEFAULT_BACKUP_RETENTION_DAYS="1"
@@ -39,7 +39,7 @@ Defaults:
   primary-region: ap-southeast-1
   secondary-region: ap-southeast-2
   engine: aurora-mysql
-  instance-class: db.t4g.medium
+  instance-class: db.r6g.large
   master-username: dbadmin
   database-name: appdb
 
@@ -551,6 +551,11 @@ require_command cut
 
 if [[ "${PRIMARY_REGION}" == "${SECONDARY_REGION}" ]]; then
   echo "ERROR: primary and secondary Regions must be different." >&2
+  exit 1
+fi
+
+if [[ "${INSTANCE_CLASS}" =~ ^db\.t[0-9a-z]+\..+ ]]; then
+  echo "ERROR: '${INSTANCE_CLASS}' is a burstable Aurora instance class and is not supported for Aurora Global Database. Use a memory-optimized class such as db.r6g.large or db.r5.large." >&2
   exit 1
 fi
 

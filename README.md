@@ -956,7 +956,7 @@ Example:
 - `commands/rds/create_aurora_global_db.sh` creates or reuses a minimal Aurora Global Database test stack with:
   - a primary cluster in `ap-southeast-1`
   - a secondary cluster in `ap-southeast-2`
-  - one `db.t4g.medium` instance in each Region
+  - one `db.r6g.large` instance in each Region
 - `commands/rds/destroy_aurora_global_db.sh` tears down that Aurora Global Database stack using the saved local state by default.
 
 Current behavior:
