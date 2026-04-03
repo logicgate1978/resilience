@@ -575,6 +575,12 @@ def _execute_arc_item(
     plan = client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
+    _wait_for_arc_plan_visibility(
+        client=client,
+        plan_arn=plan_arn,
+        poll_seconds=max(2, min(poll_seconds, 10)),
+        timeout_seconds=min(timeout_seconds, 300),
+    )
 
     execution = client.start_plan_execution(planArn=plan_arn, **item["request"])
     execution_id = execution["executionId"]
@@ -610,6 +616,29 @@ def _execute_arc_item(
             "finalGlobalDbState": final_state,
         },
     }
+
+
+def _wait_for_arc_plan_visibility(
+    *,
+    client,
+    plan_arn: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    deadline = time.time() + timeout_seconds
+    last_error: Exception | None = None
+
+    while time.time() < deadline:
+        try:
+            return client.get_plan(planArn=plan_arn).get("plan") or {}
+        except Exception as exc:
+            last_error = exc
+            sleep_seconds = max(1, poll_seconds)
+            time.sleep(sleep_seconds)
+
+    if last_error is not None:
+        raise last_error
+    raise TimeoutError(f"Timed out waiting for ARC plan visibility: {plan_arn}")
 
 
 def _execute_sdk_item(
