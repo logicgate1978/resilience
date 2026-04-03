@@ -14,7 +14,7 @@ services:
 - name: ec2
   action: terminate
   tags: Name=resilience-asg-web-instance
-  start_after: common:wait
+  start_after: common:wait#1
 
 - name: common
   action: wait
