@@ -9,7 +9,6 @@ services:
   action: wait
   duration: PT2M
   start_after: rds:reboot#1
-  use_fis: false
 
 - name: rds
   action: reboot
