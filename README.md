@@ -195,7 +195,7 @@ Responsibilities:
     <tr><th colspan="3" align="left">EC2</th></tr>
     <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
     <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances and restart them after the configured duration. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. In the boto3 path, <code>service.duration</code> is required and controls when the instances are started again.</td><td><code>aws:ec2:stop-instances</code></td></tr>
-    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is not used in the boto3 path.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
+    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
     <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
     <tr><th colspan="3" align="left">RDS</th></tr>
     <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
@@ -568,7 +568,7 @@ Current behavior:
 - `ec2:reboot`
   - reboots the selected instances
   - waits until EC2 instance status checks return `ok`
-  - does not use `service.duration`
+  - ignores `service.duration`
 - `ec2:terminate`
   - terminates the selected instances
   - waits until they are terminated
