@@ -367,7 +367,7 @@ ensure_primary_cluster() {
     --db-subnet-group-name "${PRIMARY_SUBNET_GROUP}"
     --vpc-security-group-ids "${PRIMARY_SECURITY_GROUP_ID}"
     --backup-retention-period "${DEFAULT_BACKUP_RETENTION_DAYS}"
-    --deletion-protection false
+    --no-deletion-protection
     --copy-tags-to-snapshot
     --tags "Key=Name,Value=${PRIMARY_CLUSTER_ID}" "Key=environment,Value=${ENV_TAG_VALUE}" "Key=project,Value=${PROJECT_TAG_VALUE}"
   )
@@ -392,7 +392,7 @@ ensure_primary_instance() {
     --db-cluster-identifier "${PRIMARY_CLUSTER_ID}" \
     --engine "${ENGINE}" \
     --db-instance-class "${INSTANCE_CLASS}" \
-    --publicly-accessible false \
+    --no-publicly-accessible \
     --tags "Key=Name,Value=${PRIMARY_INSTANCE_ID}" "Key=environment,Value=${ENV_TAG_VALUE}" "Key=project,Value=${PROJECT_TAG_VALUE}" \
     >/dev/null
 
@@ -414,7 +414,7 @@ ensure_secondary_cluster() {
     --db-subnet-group-name "${SECONDARY_SUBNET_GROUP}" \
     --vpc-security-group-ids "${SECONDARY_SECURITY_GROUP_ID}" \
     --backup-retention-period "${DEFAULT_BACKUP_RETENTION_DAYS}" \
-    --deletion-protection false \
+    --no-deletion-protection \
     --copy-tags-to-snapshot \
     --tags "Key=Name,Value=${SECONDARY_CLUSTER_ID}" "Key=environment,Value=${ENV_TAG_VALUE}" "Key=project,Value=${PROJECT_TAG_VALUE}" \
     >/dev/null
@@ -434,7 +434,7 @@ ensure_secondary_instance() {
     --db-cluster-identifier "${SECONDARY_CLUSTER_ID}" \
     --engine "${ENGINE}" \
     --db-instance-class "${INSTANCE_CLASS}" \
-    --publicly-accessible false \
+    --no-publicly-accessible \
     --tags "Key=Name,Value=${SECONDARY_INSTANCE_ID}" "Key=environment,Value=${ENV_TAG_VALUE}" "Key=project,Value=${PROJECT_TAG_VALUE}" \
     >/dev/null
 
