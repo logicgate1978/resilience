@@ -14,3 +14,4 @@ services:
 - name: rds
   action: reboot
   tags: Name=test
+  start_after: common:wait
