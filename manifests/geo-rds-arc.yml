@@ -5,3 +5,4 @@ services:
 - name: rds
   action: failover-global-db
   identifier: resilience-aurora-global
+  from: ap-southeast-1
