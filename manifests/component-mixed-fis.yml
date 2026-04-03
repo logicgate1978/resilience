@@ -4,6 +4,12 @@ services:
 - name: ec2
   action: stop
   tags: Name=test
+  duration: PT2M
+
+- name: common
+  action: wait
+  duration: PT2M
+  start_after: ec2:stop
 
 - name: ec2
   action: terminate
