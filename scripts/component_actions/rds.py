@@ -6,7 +6,9 @@ from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns, discover_rds_global_clusters
 from utility import (
     normalize_service_name,
+    parse_tags,
     resolve_service_primary_region,
+    resolve_service_region,
     resolve_service_secondary_region,
     resolve_service_zone,
 )
@@ -64,6 +66,101 @@ def _resolve_global_db_from_side(from_value: Any, primary_region: str, secondary
     )
 
 
+def _region_from_cluster_arn(cluster_arn: str) -> str:
+    parts = (cluster_arn or "").split(":")
+    if len(parts) < 4:
+        return ""
+    return str(parts[3] or "")
+
+
+def _resource_has_matching_tags(rds_client, resource_arn: str, tags: Dict[str, str]) -> bool:
+    if not tags:
+        return True
+    try:
+        response = rds_client.list_tags_for_resource(ResourceName=resource_arn)
+    except Exception:
+        return False
+    actual = {t["Key"]: t.get("Value", "") for t in response.get("TagList", []) if "Key" in t}
+    return all(actual.get(k) == v for k, v in tags.items())
+
+
+def _discover_global_db_target_generic(
+    *,
+    session,
+    lookup_region: str,
+    svc: Dict[str, Any],
+    action: str,
+) -> Dict[str, Any]:
+    identifier = str(svc.get("identifier") or "").strip()
+    target_region = str(svc.get("target_region") or "").strip()
+    tags = parse_tags(svc.get("tags"))
+
+    if not identifier and not tags:
+        raise ValueError(f"rds:{action} requires identifier or tags for Aurora Global Database discovery.")
+    if not target_region:
+        raise ValueError(f"rds:{action} with use_arc=false requires service.target_region.")
+
+    rds = session.client("rds", region_name=lookup_region)
+    paginator = rds.get_paginator("describe_global_clusters")
+    matches: List[Dict[str, Any]] = []
+
+    for page in paginator.paginate():
+        for global_cluster in page.get("GlobalClusters", []):
+            global_cluster_identifier = str(global_cluster.get("GlobalClusterIdentifier") or "")
+            global_cluster_arn = str(global_cluster.get("GlobalClusterArn") or "")
+            if identifier and global_cluster_identifier != identifier:
+                continue
+
+            member_cluster_arns: Dict[str, str] = {}
+            for member in global_cluster.get("GlobalClusterMembers") or []:
+                cluster_arn = str(member.get("DBClusterArn") or "")
+                if not cluster_arn:
+                    continue
+                member_region = _region_from_cluster_arn(cluster_arn)
+                if not member_region:
+                    continue
+                member_cluster_arns[member_region] = cluster_arn
+
+            if target_region not in member_cluster_arns:
+                continue
+
+            if tags:
+                matches_global_tags = bool(global_cluster_arn) and _resource_has_matching_tags(rds, global_cluster_arn, tags)
+                matches_member_tags = any(
+                    _resource_has_matching_tags(session.client("rds", region_name=member_region), cluster_arn, tags)
+                    for member_region, cluster_arn in member_cluster_arns.items()
+                )
+                if not (matches_global_tags or matches_member_tags):
+                    continue
+
+            matches.append(
+                {
+                    "service": f"rds:{action}",
+                    "action": action,
+                    "use_arc": False,
+                    "selection_mode": "ALL",
+                    "global_cluster_identifier": global_cluster_identifier,
+                    "global_cluster_arn": global_cluster_arn,
+                    "member_cluster_arns": member_cluster_arns,
+                    "target_region": target_region,
+                    "tags": tags,
+                }
+            )
+
+    if len(matches) == 0:
+        raise ValueError(
+            f"No Aurora global database matched the requested selector for rds:{action} "
+            f"(identifier={identifier or '<none>'}, target_region={target_region})."
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple Aurora global databases matched the requested selector for rds:{action}. "
+            "Please refine identifier/tags so exactly one global database is selected."
+        )
+
+    return matches[0]
+
+
 class RDSAction(CustomComponentAction):
     service_name = "rds"
     action_names = ["reboot", "failover", "failover-global-db", "switchover-global-db"]
@@ -85,6 +182,7 @@ class RDSAction(CustomComponentAction):
                 manifest=manifest,
                 svc=svc,
                 session=session,
+                region=region,
                 index=index,
                 default_timeout_seconds=default_timeout_seconds,
             )
@@ -154,33 +252,45 @@ class RDSAction(CustomComponentAction):
         manifest: Dict[str, Any],
         svc: Dict[str, Any],
         session,
+        region: str,
         index: int,
         default_timeout_seconds: int,
     ) -> Dict[str, Any]:
         action = str(svc.get("action") or "").strip().lower()
-        primary_region = resolve_service_primary_region(manifest, svc)
-        secondary_region = resolve_service_secondary_region(manifest, svc)
-        from_side = _resolve_global_db_from_side(svc.get("from"), primary_region, secondary_region)
+        target_region = str(svc.get("target_region") or "").strip()
 
-        if not primary_region or not secondary_region:
-            raise ValueError(
-                f"rds:{action} requires primary_region and secondary_region at the top level or service level."
+        if target_region:
+            lookup_region = resolve_service_region(manifest, svc, default=target_region or region) or target_region or region
+            target = _discover_global_db_target_generic(
+                session=session,
+                lookup_region=lookup_region,
+                svc=svc,
+                action=action,
             )
-        if primary_region == secondary_region:
-            raise ValueError(f"rds:{action} requires primary_region and secondary_region to be different.")
+        else:
+            primary_region = resolve_service_primary_region(manifest, svc)
+            secondary_region = resolve_service_secondary_region(manifest, svc)
+            _resolve_global_db_from_side(svc.get("from"), primary_region, secondary_region)
 
-        resolved = discover_rds_global_clusters(
-            manifest={
-                "services": [svc],
-                "primary_region": primary_region,
-                "secondary_region": secondary_region,
-            },
-            session=session,
-        )
-        if len(resolved) != 1:
-            raise ValueError(f"rds:{action} expected exactly one Aurora global database match.")
+            if not primary_region or not secondary_region:
+                raise ValueError(
+                    f"rds:{action} requires primary_region and secondary_region at the top level or service level."
+                )
+            if primary_region == secondary_region:
+                raise ValueError(f"rds:{action} requires primary_region and secondary_region to be different.")
 
-        target = dict(resolved[0])
+            resolved = discover_rds_global_clusters(
+                manifest={
+                    "services": [svc],
+                    "primary_region": primary_region,
+                    "secondary_region": secondary_region,
+                },
+                session=session,
+            )
+            if len(resolved) != 1:
+                raise ValueError(f"rds:{action} expected exactly one Aurora global database match.")
+            target = dict(resolved[0])
+
         impacted_resources = []
         if target.get("global_cluster_arn"):
             impacted_resources.append(
@@ -354,10 +464,12 @@ class RDSAction(CustomComponentAction):
         started_at = _utc_now_iso()
         action = str(item.get("action") or "").strip().lower()
         target = dict(item.get("target") or {})
-        primary_region = str(target.get("primary_region") or "").strip()
-        secondary_region = str(target.get("secondary_region") or "").strip()
-        from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
-        target_region = secondary_region if from_side == "primary" else primary_region
+        target_region = str(target.get("target_region") or "").strip()
+        if not target_region:
+            primary_region = str(target.get("primary_region") or "").strip()
+            secondary_region = str(target.get("secondary_region") or "").strip()
+            from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
+            target_region = secondary_region if from_side == "primary" else primary_region
         client = session.client("rds", region_name=target_region)
 
         request: Dict[str, Any] = {
@@ -446,9 +558,12 @@ def _wait_for_global_db_ready(
     timeout_seconds: int,
 ) -> Dict[str, Any]:
     member_cluster_arns = target["member_cluster_arns"]
-    primary_region = target["primary_region"]
-    secondary_region = target["secondary_region"]
-    target_region = secondary_region if str(target["from"]) == "primary" else primary_region
+    target_region = str(target.get("target_region") or "").strip()
+    if not target_region:
+        primary_region = target["primary_region"]
+        secondary_region = target["secondary_region"]
+        from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
+        target_region = secondary_region if from_side == "primary" else primary_region
     target_cluster_arn = member_cluster_arns[target_region]
     control_client = session.client("rds", region_name=target_region)
 
