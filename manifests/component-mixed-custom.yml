@@ -1,0 +1,41 @@
+region: ap-southeast-1
+
+services:
+- name: ec2
+  action: stop
+  tags: Name=test
+  use_fis: false
+
+- name: ec2
+  action: terminate
+  tags: Name=test
+  start_after: ec2:stop
+  use_fis: false
+
+- name: common
+  action: wait
+  duration: PT2M
+  start_after: ec2:terminate
+  use_fis: false
+
+- name: rds
+  action: reboot
+  tags: Name=test
+  start_after: common:wait
+  use_fis: false
+
+- name: dns
+  action: set-value
+  target:
+    hosted_zone: logicgate.biz
+    record_name: dev.logicgate.biz
+    record_type: A
+  value: 4.4.4.4
+
+- name: dns
+  action: set-weight
+  target:
+    hosted_zone: logicgate.biz
+    record_name: weighted.logicgate.biz
+    record_type: A
+  value: primary=1,secondary=99
