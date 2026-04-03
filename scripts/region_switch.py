@@ -472,7 +472,7 @@ def _build_arc_execution_item(
             "action": "activate",
             "mode": action_cfg["mode"],
             "comment": plan_description,
-            "latestVersion": "true",
+            "latestVersion": True,
         },
     }
 
@@ -485,9 +485,9 @@ def _build_non_arc_execution_item(
     _ = manifest
     action = str(target["action"])
     action_cfg = REGION_ACTION_CONFIG[action]["non_arc"]
-    from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
     primary_region = target["primary_region"]
     secondary_region = target["secondary_region"]
+    from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
     source_region = primary_region if from_side == "primary" else secondary_region
     target_region = secondary_region if from_side == "primary" else primary_region
     target_cluster_arn = target["member_cluster_arns"][target_region]

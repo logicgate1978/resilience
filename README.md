@@ -449,7 +449,7 @@ When `use_arc = true`, the code:
    - `activate`
    - `ungraceful` for `failover-global-db`
    - `graceful` for `switchover-global-db`
-   - a short retry loop after `CreatePlan` so `StartPlanExecution` waits for the new plan ARN to become executable
+   - a short retry loop after `CreatePlan` so `StartPlanExecution` waits for the new plan ARN and latest plan version to become executable
 
 ### Non-ARC Path
 
