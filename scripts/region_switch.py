@@ -567,18 +567,19 @@ def _execute_arc_item(
     poll_seconds: int,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
-    client = session.client("arc-region-switch", region_name=item["planControlRegion"])
+    plan_client = session.client("arc-region-switch", region_name=item["planControlRegion"])
     start_time = datetime.now(timezone.utc).isoformat()
 
     print(f"[INFO] ARC is running: {item['service']}")
-    plan = client.create_plan(**item["payload"])["plan"]
+    plan = plan_client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
 
     request = dict(item["request"])
+    execution_client = session.client("arc-region-switch", region_name=request["targetRegion"])
 
     execution = _start_arc_plan_execution_with_retry(
-        client=client,
+        client=execution_client,
         plan_arn=plan_arn,
         request=request,
         poll_seconds=max(2, min(poll_seconds, 10)),
@@ -588,7 +589,7 @@ def _execute_arc_item(
     print(f"[OK] Started ARC Region switch executionId: {execution_id}")
 
     final_execution = _wait_for_arc_execution(
-        client=client,
+        client=execution_client,
         plan_arn=plan_arn,
         execution_id=execution_id,
         poll_seconds=poll_seconds,
@@ -611,6 +612,8 @@ def _execute_arc_item(
         "details": {
             "planArn": plan_arn,
             "executionId": execution_id,
+            "planControlRegion": item["planControlRegion"],
+            "executionRegion": request["targetRegion"],
             "payload": item["payload"],
             "request": request,
             "rawExecution": final_execution,

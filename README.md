@@ -446,6 +446,8 @@ When `use_arc = true`, the code:
    - one `activate` workflow for each Region in the plan
    - one Aurora Global Database step in each workflow
 2. starts execution with:
+   - plan creation through the control Region endpoint
+   - execution start and execution polling through the target Region endpoint
    - `activate`
    - `ungraceful` for `failover-global-db`
    - `graceful` for `switchover-global-db`
