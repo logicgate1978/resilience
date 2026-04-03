@@ -101,7 +101,13 @@ def _collect_subnets(session, region: str, zone: Optional[str], tags: Dict[str, 
     return arns
 
 
-def _collect_rds_instances(session, region: str, zone: Optional[str], tags: Dict[str, str]) -> List[str]:
+def _collect_rds_instances(
+    session,
+    region: str,
+    zone: Optional[str],
+    tags: Dict[str, str],
+    identifier: Optional[str] = None,
+) -> List[str]:
     rds = session.client("rds", region_name=region)
     arns: List[str] = []
 
@@ -111,6 +117,11 @@ def _collect_rds_instances(session, region: str, zone: Optional[str], tags: Dict
             db_arn = db.get("DBInstanceArn")
             if not db_arn:
                 continue
+
+            if identifier:
+                db_identifier = str(db.get("DBInstanceIdentifier") or "")
+                if db_identifier != identifier:
+                    continue
 
             if zone:
                 az = db.get("AvailabilityZone")
@@ -153,7 +164,13 @@ def _cluster_writer_az(session, region: str, cluster: Dict[str, Any]) -> Optiona
         return None
 
 
-def _collect_rds_clusters(session, region: str, zone: Optional[str], tags: Dict[str, str]) -> List[str]:
+def _collect_rds_clusters(
+    session,
+    region: str,
+    zone: Optional[str],
+    tags: Dict[str, str],
+    identifier: Optional[str] = None,
+) -> List[str]:
     rds = session.client("rds", region_name=region)
     arns: List[str] = []
 
@@ -163,6 +180,11 @@ def _collect_rds_clusters(session, region: str, zone: Optional[str], tags: Dict[
             db_arn = db.get("DBClusterArn")
             if not db_arn:
                 continue
+
+            if identifier:
+                db_identifier = str(db.get("DBClusterIdentifier") or "")
+                if db_identifier != identifier:
+                    continue
 
             # Strict for site test:
             # FIS scopes rds:cluster by writerAvailabilityZoneIdentifiers, so match writer AZ exactly.
@@ -309,6 +331,7 @@ def collect_service_resource_arns(
     name = normalize_service_name(svc.get("name"))
     action = (svc.get("action") or "").strip().lower()
     tags = parse_tags(svc.get("tags"))
+    identifier = str(svc.get("identifier") or "").strip()
 
     if name == "ec2" and action in ("stop", "reboot", "terminate"):
         arns = _collect_ec2_instances(session, region, zone, tags)
@@ -318,10 +341,10 @@ def collect_service_resource_arns(
         return _collect_subnets(session, region, zone, tags)
 
     if name == "rds" and action == "reboot":
-        return _collect_rds_instances(session, region, zone, tags)
+        return _collect_rds_instances(session, region, zone, tags, identifier=identifier or None)
 
     if name == "rds" and action == "failover":
-        return _collect_rds_clusters(session, region, zone, tags)
+        return _collect_rds_clusters(session, region, zone, tags, identifier=identifier or None)
 
     if name == "asg" and action in ("pause-launch", "scale"):
         return _collect_asgs(session, region, zone, tags)
@@ -413,9 +436,14 @@ def discover_rds_global_clusters(
             global_clusters_by_identifier = global_clusters_cache[primary_region]
 
         tags = parse_tags(svc.get("tags"))
+        identifier = str(svc.get("identifier") or "").strip()
         matches: List[Dict[str, Any]] = []
 
         for global_cluster in global_clusters_by_identifier.values():
+            global_cluster_identifier = str(global_cluster.get("GlobalClusterIdentifier") or "")
+            if identifier and global_cluster_identifier != identifier:
+                continue
+
             members = global_cluster.get("GlobalClusterMembers") or []
             member_arns_by_region: Dict[str, str] = {}
             extra_member_counts: Dict[str, int] = {}
@@ -461,7 +489,7 @@ def discover_rds_global_clusters(
                     "selection_mode": "ALL",
                     "primary_region": primary_region,
                     "secondary_region": secondary_region,
-                    "global_cluster_identifier": str(global_cluster.get("GlobalClusterIdentifier") or ""),
+                    "global_cluster_identifier": global_cluster_identifier,
                     "global_cluster_arn": global_cluster_arn,
                     "member_cluster_arns": {
                         primary_region: member_arns_by_region[primary_region],

@@ -1,0 +1,18 @@
+region: ap-southeast-1
+
+services:
+- name: rds
+  action: reboot
+  identifier: database-1
+  use_fis: false
+
+- name: common
+  action: wait
+  duration: PT2M
+  start_after: rds:reboot#1
+  use_fis: false
+
+- name: rds
+  action: reboot
+  tags: Name=test
+  use_fis: false

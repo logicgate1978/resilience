@@ -42,6 +42,13 @@ class ValidationContext:
         return self._selected_resource_arns
 
     def selection_summary(self) -> str:
+        identifier = str(self.service.get("identifier") or "").strip()
+        if identifier:
+            tags = parse_tags(self.service.get("tags"))
+            if tags:
+                tag_text = ",".join(f"{k}={v}" for k, v in sorted(tags.items()))
+                return f"identifier: {identifier}; tags: {tag_text}"
+            return f"identifier: {identifier}"
         tags = parse_tags(self.service.get("tags"))
         if tags:
             tag_text = ",".join(f"{k}={v}" for k, v in sorted(tags.items()))

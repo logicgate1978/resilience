@@ -1,0 +1,9 @@
+primary_region: ap-southeast-1
+secondary_region: ap-southeast-2
+
+services:
+- name: rds
+  action: failover-global-db
+  tags: environment=development,project=clouddash
+  from: primary
+  use_arc: false
