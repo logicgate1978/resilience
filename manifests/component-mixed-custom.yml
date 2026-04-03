@@ -1,15 +1,23 @@
 region: ap-southeast-1
 
 services:
+- name: asg
+  action: scale
+  tags: Name=resilience-asg-web-instance
+  parameters:
+    max: 2
+    wait_for_ready: true
+    timeout_seconds: 900
+
 - name: ec2
   action: stop
   tags: Name=resilience-asg-web-instance
-  duration: PT1M
+  duration: PT2M
   use_fis: false
 
 - name: common
   action: wait
-  duration: PT1M
+  duration: PT2M
   start_after: ec2:stop
   use_fis: false
 
@@ -21,7 +29,7 @@ services:
 
 - name: common
   action: wait
-  duration: PT1M
+  duration: PT2M
   start_after: ec2:terminate
   use_fis: false
 
