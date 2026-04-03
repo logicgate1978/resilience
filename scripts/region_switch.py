@@ -472,7 +472,6 @@ def _build_arc_execution_item(
             "action": "activate",
             "mode": action_cfg["mode"],
             "comment": plan_description,
-            "latestVersion": True,
         },
     }
 
@@ -574,12 +573,17 @@ def _execute_arc_item(
     print(f"[INFO] ARC is running: {item['service']}")
     plan = client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
+    plan_version = str(plan.get("version") or "").strip()
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
+
+    request = dict(item["request"])
+    if plan_version:
+        request["version"] = plan_version
 
     execution = _start_arc_plan_execution_with_retry(
         client=client,
         plan_arn=plan_arn,
-        request=item["request"],
+        request=request,
         poll_seconds=max(2, min(poll_seconds, 10)),
         timeout_seconds=min(timeout_seconds, 300),
     )
@@ -609,9 +613,10 @@ def _execute_arc_item(
         "endTime": datetime.now(timezone.utc).isoformat(),
         "details": {
             "planArn": plan_arn,
+            "planVersion": plan_version,
             "executionId": execution_id,
             "payload": item["payload"],
-            "request": item["request"],
+            "request": request,
             "rawExecution": final_execution,
             "finalGlobalDbState": final_state,
         },
