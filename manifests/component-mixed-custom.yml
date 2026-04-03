@@ -11,25 +11,25 @@ services:
 
 - name: ec2
   action: stop
-  tags: Name=resilience-asg-web-instance
-  duration: PT2M
+  tags: Name=ec2-test
+  duration: PT1M
   use_fis: false
 
 - name: common
   action: wait
-  duration: PT2M
+  duration: PT1M
   start_after: ec2:stop
   use_fis: false
 
 - name: ec2
   action: terminate
-  tags: Name=resilience-asg-web-instance
+  tags: Name=ec2-test
   start_after: common:wait#1
   use_fis: false
 
 - name: common
   action: wait
-  duration: PT2M
+  duration: PT1M
   start_after: ec2:terminate
   use_fis: false
 

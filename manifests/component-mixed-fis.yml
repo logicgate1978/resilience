@@ -4,11 +4,11 @@ services:
 - name: ec2
   action: stop
   tags: Name=resilience-asg-web-instance
-  duration: PT2M
+  duration: PT1M
 
 - name: common
   action: wait
-  duration: PT2M
+  duration: PT1M
   start_after: ec2:stop
 
 - name: ec2
@@ -18,7 +18,7 @@ services:
 
 - name: common
   action: wait
-  duration: PT2M
+  duration: PT1M
   start_after: ec2:terminate
 
 - name: rds
