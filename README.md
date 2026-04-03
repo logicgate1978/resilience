@@ -260,7 +260,7 @@ Responsibilities:
     <tr><td><code>service.destination_region</code></td><td>Yes for <code>s3:pause-replication</code></td><td><code>s3:pause-replication</code></td><td>Region where the destination replication buckets are located.</td></tr>
     <tr><td><code>service.destination_buckets</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of destination S3 bucket names to narrow which replication destinations are paused.</td></tr>
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
-    <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the <code>primary</code> or <code>secondary</code> Region.</td></tr>
+    <tr><td><code>service.from</code></td><td>Yes for Aurora Global Database region actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Indicates whether the workload is currently active in the primary or secondary side. Accepted values are <code>primary</code>, <code>secondary</code>, the configured <code>primary_region</code>, or the configured <code>secondary_region</code>.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Chooses the execution engine for supported Aurora Global Database actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom boto3 implementation.</td></tr>
     <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
     <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code></td><td>Whether the EFS failover action waits until the replication configuration is fully deleted before completing. Defaults to <code>true</code>.</td></tr>
@@ -406,8 +406,11 @@ observability:
 
 Notes on Aurora Global Database manifests:
 
-- `from: primary` means switch away from the current primary Region into the secondary Region
-- `from: secondary` means switch back into the primary Region
+- `from` can be either:
+  - `primary` / `secondary`
+  - or the actual Region name from `primary_region` / `secondary_region`
+- `from: primary` or `from: <primary_region>` means switch away from the current primary Region into the secondary Region
+- `from: secondary` or `from: <secondary_region>` means switch back into the primary Region
 - tags are used for discovery; the user does not need to provide the Aurora Global Database ARN or member cluster ARNs
 - `use_arc` only applies to Aurora Global Database actions
 - if `use_arc` is omitted, the current default behavior is `true`

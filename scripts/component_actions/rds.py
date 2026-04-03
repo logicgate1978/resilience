@@ -53,6 +53,17 @@ def _describe_db_instance(rds, instance_identifier: str) -> Dict[str, Any]:
     return instances[0]
 
 
+def _resolve_global_db_from_side(from_value: Any, primary_region: str, secondary_region: str) -> str:
+    value = str(from_value or "").strip().lower()
+    if value == "primary" or value == str(primary_region or "").strip().lower():
+        return "primary"
+    if value == "secondary" or value == str(secondary_region or "").strip().lower():
+        return "secondary"
+    raise ValueError(
+        "services[].from must be 'primary', 'secondary', primary_region, or secondary_region."
+    )
+
+
 class RDSAction(CustomComponentAction):
     service_name = "rds"
     action_names = ["reboot", "failover", "failover-global-db", "switchover-global-db"]
@@ -147,12 +158,10 @@ class RDSAction(CustomComponentAction):
         default_timeout_seconds: int,
     ) -> Dict[str, Any]:
         action = str(svc.get("action") or "").strip().lower()
-        from_side = str(svc.get("from") or "").strip().lower()
         primary_region = resolve_service_primary_region(manifest, svc)
         secondary_region = resolve_service_secondary_region(manifest, svc)
+        from_side = _resolve_global_db_from_side(svc.get("from"), primary_region, secondary_region)
 
-        if from_side not in ("primary", "secondary"):
-            raise ValueError(f"rds:{action} requires services[].from to be 'primary' or 'secondary'.")
         if not primary_region or not secondary_region:
             raise ValueError(
                 f"rds:{action} requires primary_region and secondary_region at the top level or service level."
@@ -347,7 +356,7 @@ class RDSAction(CustomComponentAction):
         target = dict(item.get("target") or {})
         primary_region = str(target.get("primary_region") or "").strip()
         secondary_region = str(target.get("secondary_region") or "").strip()
-        from_side = str(target.get("from") or "").strip().lower()
+        from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
         target_region = secondary_region if from_side == "primary" else primary_region
         client = session.client("rds", region_name=target_region)
 

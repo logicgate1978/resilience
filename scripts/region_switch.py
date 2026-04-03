@@ -45,6 +45,17 @@ REGION_ACTION_CONFIG: Dict[str, Dict[str, Any]] = {
 }
 
 
+def _resolve_global_db_from_side(from_value: Any, primary_region: str, secondary_region: str) -> str:
+    value = str(from_value or "").strip().lower()
+    if value == "primary" or value == str(primary_region or "").strip().lower():
+        return "primary"
+    if value == "secondary" or value == str(secondary_region or "").strip().lower():
+        return "secondary"
+    raise ValueError(
+        "services[].from must be 'primary', 'secondary', primary_region, or secondary_region."
+    )
+
+
 def validate_region_manifest(manifest: Dict[str, Any]) -> None:
     services = manifest.get("services")
     if not isinstance(services, list) or not services:
@@ -393,7 +404,7 @@ def _build_arc_execution_item(
     secondary_region = target["secondary_region"]
     action = str(target["action"])
     action_cfg = REGION_ACTION_CONFIG[action]["arc"]
-    from_side = str(target["from"])
+    from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
     target_region = secondary_region if from_side == "primary" else primary_region
 
     plan_name = f"rs-rds-{index}-{utc_ts()}".lower()
@@ -470,7 +481,7 @@ def _build_non_arc_execution_item(
     _ = manifest
     action = str(target["action"])
     action_cfg = REGION_ACTION_CONFIG[action]["non_arc"]
-    from_side = str(target["from"])
+    from_side = _resolve_global_db_from_side(target.get("from"), primary_region, secondary_region)
     primary_region = target["primary_region"]
     secondary_region = target["secondary_region"]
     source_region = primary_region if from_side == "primary" else secondary_region
@@ -962,12 +973,10 @@ def _cluster_identifier_from_arn(cluster_arn: str) -> str:
 
 
 def _validate_region_rds_service(manifest: Dict[str, Any], svc: Dict[str, Any], index: int) -> None:
-    from_side = (svc.get("from") or "").strip().lower()
-    use_arc = svc.get("use_arc", True)
     primary_region = resolve_service_primary_region(manifest, svc)
     secondary_region = resolve_service_secondary_region(manifest, svc)
-    if from_side not in ("primary", "secondary"):
-        raise ValueError(f"services[{index}].from must be 'primary' or 'secondary'.")
+    from_side = _resolve_global_db_from_side(svc.get("from"), primary_region, secondary_region)
+    use_arc = svc.get("use_arc", True)
     if not isinstance(svc.get("tags"), str) or not str(svc.get("tags") or "").strip():
         raise ValueError(f"services[{index}].tags is required for Aurora global database discovery.")
     if not primary_region or not secondary_region:
