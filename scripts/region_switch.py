@@ -573,12 +573,9 @@ def _execute_arc_item(
     print(f"[INFO] ARC is running: {item['service']}")
     plan = client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
-    plan_version = str(plan.get("version") or "").strip()
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
 
     request = dict(item["request"])
-    if plan_version:
-        request["version"] = plan_version
 
     execution = _start_arc_plan_execution_with_retry(
         client=client,
@@ -613,7 +610,6 @@ def _execute_arc_item(
         "endTime": datetime.now(timezone.utc).isoformat(),
         "details": {
             "planArn": plan_arn,
-            "planVersion": plan_version,
             "executionId": execution_id,
             "payload": item["payload"],
             "request": request,
