@@ -5,7 +5,7 @@ services:
     hosted_zone: logicgate.biz
     record_name: dev.logicgate.biz
     record_type: A
-  value: 3.3.3.3
+  value: 6.6.6.6
 
 - name: dns
   action: set-weight
@@ -13,4 +13,4 @@ services:
     hosted_zone: logicgate.biz
     record_name: weighted.logicgate.biz
     record_type: A
-  value: primary=10,secondary=90
+  value: primary=2,secondary=98
