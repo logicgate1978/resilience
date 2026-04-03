@@ -951,6 +951,33 @@ Example:
 ./commands/ec2/destroy_asg_alb_stack.sh
 ```
 
+### RDS / Aurora Global Database Helper
+
+- `commands/rds/create_aurora_global_db.sh` creates or reuses a minimal Aurora Global Database test stack with:
+  - a primary cluster in `ap-southeast-1`
+  - a secondary cluster in `ap-southeast-2`
+  - one `db.t4g.medium` instance in each Region
+- `commands/rds/destroy_aurora_global_db.sh` tears down that Aurora Global Database stack using the saved local state by default.
+
+Current behavior:
+
+- uses `aurora-mysql`
+- uses the Region's default VPC and default subnets unless VPC overrides are supplied
+- creates one security group per Region with no inbound rules
+- tags the Aurora clusters and instances with:
+  - `environment=development`
+  - `project=clouddash`
+- writes stack state to `commands/rds/.state/current_aurora_global_db.txt`
+- generates a master password when one is not provided and stores it in the state file
+
+Example:
+
+```bash
+./commands/rds/create_aurora_global_db.sh
+./commands/rds/create_aurora_global_db.sh --name clouddash-global --engine-version <engine-version>
+./commands/rds/destroy_aurora_global_db.sh
+```
+
 ### Run a Component or Site Test
 
 From `scripts/`:
