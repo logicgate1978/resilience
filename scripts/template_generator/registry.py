@@ -220,6 +220,7 @@ def generate_template_payload(
             generator.apply_site_scope(
                 target=targets[target_name],
                 manifest=manifest,
+                svc=svc,
                 resource_type=resource_type,
                 resource_arns=resource_arns,
                 apply_site_scope_to_target_fn=apply_site_scope_to_target,

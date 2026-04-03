@@ -92,6 +92,7 @@ class ServiceTemplateGenerator(ABC):
         *,
         target: Dict[str, Any],
         manifest: Dict[str, Any],
+        svc: ManifestService,
         resource_type: str,
         resource_arns: Optional[List[str]],
         apply_site_scope_to_target_fn,
