@@ -1,0 +1,6 @@
+services:
+- name: rds
+  action: failover-global-db
+  identifier: resilience-aurora-global
+  target_region: ap-southeast-1
+  use_arc: false
