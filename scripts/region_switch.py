@@ -575,14 +575,14 @@ def _execute_arc_item(
     plan = client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
     print(f"[OK] Created ARC Region switch plan: {plan_arn}")
-    _wait_for_arc_plan_visibility(
+
+    execution = _start_arc_plan_execution_with_retry(
         client=client,
         plan_arn=plan_arn,
+        request=item["request"],
         poll_seconds=max(2, min(poll_seconds, 10)),
         timeout_seconds=min(timeout_seconds, 300),
     )
-
-    execution = client.start_plan_execution(planArn=plan_arn, **item["request"])
     execution_id = execution["executionId"]
     print(f"[OK] Started ARC Region switch executionId: {execution_id}")
 
@@ -618,27 +618,34 @@ def _execute_arc_item(
     }
 
 
-def _wait_for_arc_plan_visibility(
+def _start_arc_plan_execution_with_retry(
     *,
     client,
     plan_arn: str,
+    request: Dict[str, Any],
     poll_seconds: int,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
+    attempt = 0
+
+    print(f"[INFO] Waiting for ARC plan to become executable: {plan_arn}")
 
     while time.time() < deadline:
         try:
-            return client.get_plan(planArn=plan_arn).get("plan") or {}
+            return client.start_plan_execution(planArn=plan_arn, **request)
         except Exception as exc:
             last_error = exc
+            attempt += 1
+            if attempt == 1 or attempt % 3 == 0:
+                print(f"[INFO] ARC plan not ready yet (attempt {attempt}): {exc}")
             sleep_seconds = max(1, poll_seconds)
             time.sleep(sleep_seconds)
 
     if last_error is not None:
         raise last_error
-    raise TimeoutError(f"Timed out waiting for ARC plan visibility: {plan_arn}")
+    raise TimeoutError(f"Timed out waiting for ARC plan execution start: {plan_arn}")
 
 
 def _execute_sdk_item(
