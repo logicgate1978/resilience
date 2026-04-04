@@ -15,7 +15,7 @@ services:
   action: scale-deployment
   region: ap-southeast-1
   target:
-    cluster_identifier: resilience-eks-20260328122508
+    cluster_identifier: resilience-eks-20260404002834
     namespace: default
     deployment_name: my-service
   parameters:
