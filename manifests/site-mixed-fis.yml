@@ -16,10 +16,6 @@ services:
   tags: Name=resilience-asg-web-asg
 
 - name: ec2
-  action: pause-launch
-  duration: PT5M
-
-- name: ec2
   action: stop
   duration: PT5M
 
