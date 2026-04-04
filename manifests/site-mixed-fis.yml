@@ -18,6 +18,7 @@ services:
 - name: ec2
   action: stop
   duration: PT5M
+  tags: project=clouddash,environment=development
 
 - name: network
   action: disrupt-connectivity
