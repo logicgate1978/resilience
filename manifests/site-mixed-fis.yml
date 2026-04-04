@@ -13,6 +13,7 @@ services:
 - name: asg
   action: pause-launch
   duration: PT5M
+  tags: Name=resilience-asg-web-asg
 
 - name: ec2
   action: pause-launch
