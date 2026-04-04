@@ -182,46 +182,45 @@ Responsibilities:
   <thead>
     <tr>
       <th>Action</th>
+      <th>Implementation</th>
       <th>Description</th>
       <th>FIS/ARC action</th>
     </tr>
   </thead>
   <tbody>
-    <tr><th colspan="3" align="left">Common</th></tr>
-    <tr><td><code>common:wait</code></td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td></tr>
-    <tr><th colspan="3" align="left">DNS</th></tr>
-    <tr><td><code>dns:set-value</code></td><td>Update the value of a simple Route 53 DNS record for component or region workflows.</td><td></td></tr>
-    <tr><td><code>dns:set-weight</code></td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td></tr>
-    <tr><th colspan="3" align="left">EC2</th></tr>
-    <tr><td><code>ec2:pause-launch</code></td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
-    <tr><td><code>ec2:stop</code></td><td>Stop selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. If <code>service.duration</code> is provided, the framework maps it to auto-restart behavior; if it is omitted, the instances remain stopped.</td><td><code>aws:ec2:stop-instances</code></td></tr>
-    <tr><td><code>ec2:reboot</code></td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
-    <tr><td><code>ec2:terminate</code></td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
-    <tr><th colspan="3" align="left">RDS</th></tr>
-    <tr><td><code>rds:reboot</code></td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
-    <tr><td><code>rds:failover</code></td><td>Fail over a selected RDS or Aurora DB cluster to a replica. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
-    <tr><td><code>rds:failover-global-db</code></td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
-    <tr><td><code>rds:switchover-global-db</code></td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
-    <tr><th colspan="3" align="left">ASG</th></tr>
-    <tr><td><code>asg:pause-launch</code></td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td></tr>
-    <tr><td><code>asg:scale</code></td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td></tr>
-    <tr><th colspan="3" align="left">Network</th></tr>
-    <tr><td><code>network:disrupt-connectivity</code></td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
-    <tr><th colspan="3" align="left">S3</th></tr>
-    <tr><td><code>s3:pause-replication</code></td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
-    <tr><th colspan="3" align="left">EFS</th></tr>
-    <tr><td><code>efs:failover</code></td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable. This is a custom boto3 implementation.</td><td></td></tr>
-    <tr><th colspan="3" align="left">EKS</th></tr>
-    <tr><td><code>eks:delete-pod</code></td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td></tr>
-    <tr><td><code>eks:pod-cpu-stress</code></td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td></tr>
-    <tr><td><code>eks:pod-io-stress</code></td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td></tr>
-    <tr><td><code>eks:pod-memory-stress</code></td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td></tr>
-    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td></tr>
-    <tr><td><code>eks:scale-deployment</code></td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API for component or region workflows.</td><td></td></tr>
+    <tr><th colspan="4" align="left">Common</th></tr>
+    <tr><td><code>common:wait</code></td><td>FIS or custom</td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td></tr>
+    <tr><th colspan="4" align="left">DNS</th></tr>
+    <tr><td><code>dns:set-value</code></td><td>Custom</td><td>Update the value of a simple Route 53 DNS record for component or region workflows.</td><td></td></tr>
+    <tr><td><code>dns:set-weight</code></td><td>Custom</td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td></tr>
+    <tr><th colspan="4" align="left">EC2</th></tr>
+    <tr><td><code>ec2:pause-launch</code></td><td>FIS</td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td></tr>
+    <tr><td><code>ec2:stop</code></td><td>FIS or custom</td><td>Stop selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. If <code>service.duration</code> is provided, the framework maps it to auto-restart behavior; if it is omitted, the instances remain stopped.</td><td><code>aws:ec2:stop-instances</code></td></tr>
+    <tr><td><code>ec2:reboot</code></td><td>FIS or custom</td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td></tr>
+    <tr><td><code>ec2:terminate</code></td><td>FIS or custom</td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td></tr>
+    <tr><th colspan="4" align="left">RDS</th></tr>
+    <tr><td><code>rds:reboot</code></td><td>FIS or custom</td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td></tr>
+    <tr><td><code>rds:failover</code></td><td>FIS or custom</td><td>Fail over a selected RDS or Aurora DB cluster to a replica. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:failover-db-cluster</code></td></tr>
+    <tr><td><code>rds:failover-global-db</code></td><td>ARC or custom</td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
+    <tr><td><code>rds:switchover-global-db</code></td><td>ARC or custom</td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td></tr>
+    <tr><th colspan="4" align="left">ASG</th></tr>
+    <tr><td><code>asg:pause-launch</code></td><td>FIS</td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td></tr>
+    <tr><td><code>asg:scale</code></td><td>Custom</td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td></tr>
+    <tr><th colspan="4" align="left">Network</th></tr>
+    <tr><td><code>network:disrupt-connectivity</code></td><td>FIS</td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
+    <tr><th colspan="4" align="left">S3</th></tr>
+    <tr><td><code>s3:pause-replication</code></td><td>FIS</td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
+    <tr><th colspan="4" align="left">EFS</th></tr>
+    <tr><td><code>efs:failover</code></td><td>Custom</td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable.</td><td></td></tr>
+    <tr><th colspan="4" align="left">EKS</th></tr>
+    <tr><td><code>eks:delete-pod</code></td><td>FIS</td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td></tr>
+    <tr><td><code>eks:pod-cpu-stress</code></td><td>FIS</td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td></tr>
+    <tr><td><code>eks:pod-io-stress</code></td><td>FIS</td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td></tr>
+    <tr><td><code>eks:pod-memory-stress</code></td><td>FIS</td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td></tr>
+    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>FIS</td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td>Custom</td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API for component or region workflows.</td><td></td></tr>
   </tbody>
 </table>
-
-`efs:failover` is implemented through the custom action path.
 
 ## Manifest Design
 
