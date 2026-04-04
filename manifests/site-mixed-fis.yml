@@ -1,5 +1,5 @@
 region: ap-southeast-1
-zone: ap-southeast-1c
+zone: ap-southeast-1a
 
 services:
 - name: rds
