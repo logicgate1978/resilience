@@ -22,4 +22,5 @@ services:
 
 - name: network
   action: disrupt-connectivity
-  duration: PT2M
+  duration: PT5M
+  tags: project=clouddash,environment=development
