@@ -16,6 +16,28 @@ class ASGTemplateGenerator(ServiceTemplateGenerator):
         "pause-launch": {"resourceType": "aws:ec2:autoscaling-group", "target_key": "AutoScalingGroups"},
     }
 
+    def apply_site_scope(
+        self,
+        *,
+        target: Dict[str, Any],
+        manifest: Dict[str, Any],
+        svc: ManifestService,
+        resource_type: str,
+        resource_arns,
+        apply_site_scope_to_target_fn,
+    ) -> None:
+        _ = target
+        _ = manifest
+        _ = svc
+        _ = resource_type
+        _ = resource_arns
+        _ = apply_site_scope_to_target_fn
+        # aws:ec2:asg-insufficient-instance-capacity-error already scopes the blast
+        # radius via the action parameter "availabilityZoneIdentifiers". Adding a
+        # second target-level AvailabilityZones filter can cause FIS target
+        # resolution to return no matching ASGs.
+        return
+
     def build_action_parameters(
         self,
         *,
