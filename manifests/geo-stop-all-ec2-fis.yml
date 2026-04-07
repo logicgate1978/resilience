@@ -15,3 +15,18 @@ services:
   action: terminate
   tags: eks:cluster-name=resilience-eks-20260407124003
   zone: ap-southeast-1c
+
+- name: asg
+  action: pause-launch
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1a
+
+- name: asg
+  action: pause-launch
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1b
+
+- name: asg
+  action: pause-launch
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1c
