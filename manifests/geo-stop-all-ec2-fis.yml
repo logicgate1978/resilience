@@ -1,27 +1,17 @@
 region: ap-southeast-1
 
 services:
-- name: eks
-  action: scale-deployment
-  region: ap-southeast-2
-  target:
-    cluster_identifier: resilience-eks-20260404004705
-    namespace: default
-    deployment_name: my-service
-  parameters:
-    replicas: 4
-    wait_for_ready: true
-    timeout_seconds: 600
+- name: ec2
+  action: terminate
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1a
 
-- name: eks
-  action: scale-deployment
-  region: ap-southeast-1
-  target:
-    cluster_identifier: resilience-eks-20260404002834
-    namespace: default
-    deployment_name: my-service
-  parameters:
-    replicas: 0
-    wait_for_ready: true
-    timeout_seconds: 600
-  start_after: eks:scale-deployment#1
+- name: ec2
+  action: terminate
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1b
+
+- name: ec2
+  action: terminate
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  zone: ap-southeast-1c
