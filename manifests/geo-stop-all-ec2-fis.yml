@@ -8,4 +8,4 @@ services:
 - name: asg
   action: pause-launch
   tags: eks:cluster-name=resilience-eks-20260407124003
-  duration: PT10M
+  duration: PT15M
