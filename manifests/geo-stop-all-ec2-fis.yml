@@ -7,5 +7,18 @@ services:
 
 - name: asg
   action: pause-launch
+  zone: ap-southeast-1a
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  duration: PT15M
+
+- name: asg
+  action: pause-launch
+  zone: ap-southeast-1b
+  tags: eks:cluster-name=resilience-eks-20260407124003
+  duration: PT15M
+
+- name: asg
+  action: pause-launch
+  zone: ap-southeast-1c
   tags: eks:cluster-name=resilience-eks-20260407124003
   duration: PT15M
