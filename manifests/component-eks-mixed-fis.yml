@@ -2,15 +2,17 @@ region: ap-southeast-1
 
 services:
 - name: eks
-  action: scale-deployment
+  action: delete-pod
   target:
     cluster_identifier: resilience-eks-20260328122508
     namespace: default
-    deployment_name: my-service
+    selector_type: labelSelector
+    selector_value: app=my-service
+    count: 1
   parameters:
-    replicas: 0
-    wait_for_ready: true
-    timeout_seconds: 600
+    kubernetes_service_account: myserviceaccount
+    grace_period_seconds: 0
+    max_errors_percent: 0
 
 # CPU stress example.
 # - name: eks
