@@ -327,6 +327,58 @@ Important sequencing note:
 - For native FIS actions, that matches FIS behavior when no `startAfter` is set.
 - For custom-only manifests, the framework also uses dependency-driven execution and only waits when `service.start_after` is declared.
 
+## Implemented Validations
+
+Only actions listed in `scripts/validations/actions.yml` currently run pre-execution validations. If a validation fails, the framework stops before starting the action and returns a descriptive error.
+
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Validation</th>
+      <th>What It Checks</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><th colspan="3" align="left">ASG</th></tr>
+    <tr><td><code>asg:scale</code></td><td><code>verify_resource_existence</code></td><td>At least one Auto Scaling Group matches the selector.</td></tr>
+    <tr><td><code>asg:scale</code></td><td><code>verify_scale_values</code></td><td><code>service.parameters.max</code> exists and is a non-negative integer; <code>min</code> and <code>desired</code>, when present, are integers within valid bounds; <code>min &lt;= desired &lt;= max</code>.</td></tr>
+
+    <tr><th colspan="3" align="left">DNS</th></tr>
+    <tr><td><code>dns:set-value</code></td><td><code>verify_record_exists</code></td><td>The target hosted zone, record name, and record type resolve to at least one Route 53 record set.</td></tr>
+    <tr><td><code>dns:set-value</code></td><td><code>verify_value_present</code></td><td><code>service.value</code> is present and non-empty.</td></tr>
+    <tr><td><code>dns:set-value</code></td><td><code>verify_simple_record_target</code></td><td>Exactly one record set matches, and it is a simple non-alias record rather than a policy or alias record.</td></tr>
+    <tr><td><code>dns:set-weight</code></td><td><code>verify_record_exists</code></td><td>The target hosted zone, record name, and record type resolve to at least one Route 53 record set.</td></tr>
+    <tr><td><code>dns:set-weight</code></td><td><code>verify_value_present</code></td><td><code>service.value</code> is present and non-empty.</td></tr>
+    <tr><td><code>dns:set-weight</code></td><td><code>verify_weight_targets</code></td><td>The value parses as <code>set_identifier=weight</code> assignments, all referenced set identifiers exist, and the matching records are true weighted records with a <code>Weight</code> field.</td></tr>
+
+    <tr><th colspan="3" align="left">EC2</th></tr>
+    <tr><td><code>ec2:stop</code></td><td><code>verify_resource_existence</code></td><td>At least one EC2 instance matches the selector.</td></tr>
+    <tr><td><code>ec2:reboot</code></td><td><code>verify_resource_existence</code></td><td>At least one EC2 instance matches the selector.</td></tr>
+    <tr><td><code>ec2:terminate</code></td><td><code>verify_resource_existence</code></td><td>At least one EC2 instance matches the selector.</td></tr>
+
+    <tr><th colspan="3" align="left">EFS</th></tr>
+    <tr><td><code>efs:failover</code></td><td><code>verify_resource_existence</code></td><td>At least one EFS file system matches the selector.</td></tr>
+    <tr><td><code>efs:failover</code></td><td><code>verify_replication_configuration_exists</code></td><td>Each selected EFS file system has an existing replication configuration that can be deleted.</td></tr>
+
+    <tr><th colspan="3" align="left">EKS</th></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td><code>verify_deployment_existence</code></td><td><code>service.target.cluster_identifier</code>, <code>namespace</code>, and <code>deployment_name</code> are present, the Kubernetes API is reachable, and the target Deployment exists.</td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td><code>verify_replicas_value</code></td><td><code>service.parameters.replicas</code> exists, is an integer, and is greater than or equal to zero.</td></tr>
+
+    <tr><th colspan="3" align="left">RDS</th></tr>
+    <tr><td><code>rds:reboot</code></td><td><code>verify_resource_existence</code></td><td>At least one DB instance matches the selector.</td></tr>
+    <tr><td><code>rds:reboot</code></td><td><code>verify_replica</code></td><td>Each selected DB instance has Multi-AZ enabled or has at least one read replica.</td></tr>
+    <tr><td><code>rds:failover</code></td><td><code>verify_resource_existence</code></td><td>At least one DB cluster matches the selector.</td></tr>
+    <tr><td><code>rds:failover</code></td><td><code>verify_replica</code></td><td>Each selected DB cluster has at least one non-writer replica/reader member available for failover.</td></tr>
+
+    <tr><th colspan="3" align="left">S3</th></tr>
+    <tr><td><code>s3:pause-replication</code></td><td><code>verify_resource_existence</code></td><td>At least one S3 bucket matches the selector.</td></tr>
+    <tr><td><code>s3:pause-relication</code></td><td><code>verify_resource_existence</code></td><td>Legacy alias for <code>s3:pause-replication</code>; the same bucket-existence validation is applied.</td></tr>
+    <tr><td><code>s3:failover</code></td><td><code>verify_mrap_selector</code></td><td>Exactly one MRAP selector is provided, <code>service.target.target_region</code> is present, and the control Region is one of the AWS-supported MRAP failover-control endpoints.</td></tr>
+    <tr><td><code>s3:failover</code></td><td><code>verify_mrap_failover_state</code></td><td>The selected MRAP exists and is <code>READY</code>, has at least two configured regions, includes the target Region, is currently active/passive with route dials of only <code>0</code> or <code>100</code>, and the target Region is not already active.</td></tr>
+  </tbody>
+</table>
+
 ### FIS Example
 
 See `manifests/component-ec2.yml`.
