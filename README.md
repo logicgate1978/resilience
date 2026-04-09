@@ -1018,6 +1018,27 @@ Current behavior:
 - writes stack state to `commands/rds/.state/current_aurora_global_db.txt`
 - generates a master password when one is not provided and stores it in the state file
 
+### S3 MRAP Helper
+
+- `commands/s3/create_s3_mrap_stack.sh` creates or reuses a minimal S3 Multi-Region Access Point test stack with:
+  - one bucket in `ap-southeast-1`
+  - one bucket in `ap-southeast-2`
+  - bidirectional replication between the two buckets
+  - one MRAP spanning both buckets
+  - MRAP route state configured as active/passive with `ap-southeast-1` active
+- `commands/s3/destroy_s3_mrap_stack.sh` tears down that S3 MRAP stack using the saved local state by default.
+
+Current behavior:
+
+- uses `eu-west-1` as the default MRAP failover-control Region
+- uses `us-west-2` for MRAP management APIs
+- creates deterministic bucket names based on the base name, account ID, and Region
+- creates one IAM role plus one inline policy for S3 replication
+- tags the buckets with:
+  - `environment=development`
+  - `project=clouddash`
+- writes stack state to `commands/s3/.state/current_s3_mrap_stack.txt`
+
 Example:
 
 ```bash
