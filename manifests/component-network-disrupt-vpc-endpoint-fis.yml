@@ -5,6 +5,3 @@ services:
   action: disrupt-vpc-endpoint
   duration: PT5M
   tags: environment=development,project=clouddash
-  target:
-    vpc_endpoint_type: Interface
-    service_name: com.amazonaws.ap-southeast-1.s3
