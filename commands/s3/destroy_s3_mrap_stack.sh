@@ -183,29 +183,26 @@ delete_bucket_replication() {
     >/dev/null 2>&1 || true
 }
 
-wait_for_mrap_operation() {
-  local request_token_arn="$1"
-  local deadline status
+wait_for_mrap_deleted() {
+  local deadline current_name
   deadline=$((SECONDS + 1800))
 
   while (( SECONDS < deadline )); do
-    status="$(aws s3control describe-multi-region-access-point-operation \
+    current_name="$(aws s3control get-multi-region-access-point \
       --account-id "${ACCOUNT_ID}" \
-      --request-token-arn "${request_token_arn}" \
+      --name "${MRAP_NAME}" \
       --region "${MANAGEMENT_REGION}" \
-      --query 'AsyncOperation.Status' \
-      --output text)"
-    if [[ "${status}" == "COMPLETED" ]]; then
+      --query 'AccessPoint.Name' \
+      --output text 2>/dev/null || true)"
+
+    if [[ -z "${current_name}" || "${current_name}" == "None" ]]; then
       return 0
     fi
-    if [[ "${status}" == "FAILED" ]]; then
-      echo "WARNING: MRAP asynchronous operation failed: ${request_token_arn}" >&2
-      return 1
-    fi
+
     sleep 15
   done
 
-  echo "WARNING: Timed out waiting for MRAP operation '${request_token_arn}' to complete." >&2
+  echo "WARNING: Timed out waiting for MRAP '${MRAP_NAME}' to be deleted." >&2
   return 1
 }
 
@@ -231,7 +228,9 @@ delete_mrap() {
     --region "${MANAGEMENT_REGION}" \
     --query 'RequestTokenARN' \
     --output text)"
-  wait_for_mrap_operation "${request_token_arn}" || true
+  echo "MRAP delete request token: ${request_token_arn}"
+  echo "Waiting for MRAP '${MRAP_NAME}' to be deleted..."
+  wait_for_mrap_deleted || true
 }
 
 delete_replication_role() {

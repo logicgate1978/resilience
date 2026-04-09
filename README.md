@@ -1081,7 +1081,7 @@ Current behavior:
   - one MRAP spanning both buckets
   - MRAP route state updated after creation so it becomes active/passive with `ap-southeast-1` active
   - one sample text object uploaded to the primary bucket after replication is configured
-- `commands/s3/destroy_s3_mrap_stack.sh` tears down that S3 MRAP stack using the saved local state by default.
+- `commands/s3/destroy_s3_mrap_stack.sh` tears down that S3 MRAP stack using the saved local state by default and waits for the MRAP itself to disappear before deleting the buckets.
 
 Current behavior:
 
