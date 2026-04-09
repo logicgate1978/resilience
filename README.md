@@ -226,104 +226,106 @@ Responsibilities:
 
 ## Manifest Design
 
+This section is split into:
+
+- top-level manifest defaults
+- shared service-block fields
+- service and action specific fields
+- observability fields
+
+### Top-Level Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `region` | Optional default | Default AWS Region for execution, resource discovery, and observability. `service.region` overrides it. For `s3:failover`, this is the MRAP failover-control Region and defaults to `eu-west-1` when omitted. |
+| `zone` | Optional default | Default Availability Zone scope. `service.zone` overrides it. |
+| `primary_region` | Optional default | Default active Region for Aurora Global Database actions. `service.primary_region` overrides it. |
+| `secondary_region` | Optional default | Default standby Region for Aurora Global Database actions. `service.secondary_region` overrides it. |
+| `services` | Yes | List of service/action blocks to execute. |
+| `observability` | No | Optional health-check and CloudWatch configuration around the experiment window. |
+
+### Shared Service Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `service.name` | Yes | Service name such as `common`, `ec2`, `rds`, `asg`, `network`, `s3`, `efs`, `dns`, or `eks`. |
+| `service.action` | Yes | Action name for that service, such as `stop`, `failover`, or `delete-pod`. |
+| `service.start_after` | No | Dependency list for ordered execution. When omitted, actions run in parallel by default. Use `<service>:<action>` when unique in the manifest, or `<service>:<action>#<n>` when repeated. |
+| `service.region` | No | Per-action Region override. It takes precedence over top-level `region`. |
+| `service.zone` | No | Per-action Availability Zone override. It takes precedence over top-level `zone`. |
+| `service.primary_region` | No | Per-action active Region override for Aurora Global Database actions. |
+| `service.secondary_region` | No | Per-action standby Region override for Aurora Global Database actions. |
+| `service.tags` | Usually yes | Comma-separated `key=value` filters used for tag-based AWS resource discovery. AND semantics are used across tags. |
+| `service.identifier` | No | Optional exact resource identifier used by supported RDS actions. If both `service.identifier` and `service.tags` are present, both must match. |
+| `service.duration` | Depends on action | ISO-8601 duration such as `PT5M` or `PT30M`. |
+| `service.use_fis` | No | Selects FIS or custom execution for supported dual-path actions. Defaults to `true`. |
+| `service.use_arc` | No | Selects ARC or custom execution for supported Aurora Global Database actions. |
+| `service.wait_for_ready` | No | Waits until the custom action reaches its steady state before completing. |
+| `service.timeout_seconds` | No | Per-action timeout for custom readiness polling. |
+| `service.value` | Yes for some actions | Action-specific string payload used by DNS actions. |
+
+### Service Fields by Action
+
 <table>
   <thead>
     <tr>
-      <th>Field</th>
-      <th>Required</th>
-      <th>Applies To</th>
-      <th>Description</th>
+      <th>Action</th>
+      <th>Required Fields</th>
+      <th>Optional Fields</th>
+      <th>Notes</th>
     </tr>
   </thead>
   <tbody>
-    <tr><th colspan="4" align="left">Top-Level Fields</th></tr>
-    <tr><td><code>region</code></td><td>Optional default</td><td>FIS actions, single-Region custom actions</td><td>Default AWS Region for execution, resource discovery, and observability. A service-level <code>service.region</code> overrides it. For <code>s3:failover</code>, this is the S3 MRAP failover-control endpoint Region and defaults to <code>eu-west-1</code> when omitted. For custom-only global actions such as Route 53 DNS, the framework can otherwise fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when no region is declared.</td></tr>
-    <tr><td><code>zone</code></td><td>Optional default</td><td>AZ-scoped actions</td><td>Default Availability Zone scope. A service-level <code>service.zone</code> overrides it.</td></tr>
-    <tr><td><code>primary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default current active Region for cross-Region Aurora Global Database actions. A service-level <code>service.primary_region</code> overrides it.</td></tr>
-    <tr><td><code>secondary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default standby Region for cross-Region Aurora Global Database actions. A service-level <code>service.secondary_region</code> overrides it.</td></tr>
-    <tr><td><code>services</code></td><td>Yes</td><td>All manifests</td><td>List of service/action blocks that describe what resilience action to run.</td></tr>
-    <tr><td><code>observability</code></td><td>No</td><td>All manifests</td><td>Optional configuration for health checks and CloudWatch metric collection around the experiment window.</td></tr>
-    <tr><th colspan="4" align="left">Service Block Fields</th></tr>
-    <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>common</code>, <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
-    <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
-    <tr><td><code>service.region</code></td><td>Optional</td><td>Region-scoped actions</td><td>Action-specific Region override. When present, it takes precedence over top-level <code>region</code>. For <code>s3:failover</code>, the allowed values are the S3 MRAP failover-control Regions, and the default is <code>eu-west-1</code>.</td></tr>
-    <tr><td><code>service.zone</code></td><td>Optional</td><td>AZ-scoped actions</td><td>Action-specific Availability Zone override. When present, it takes precedence over top-level <code>zone</code>. For <code>asg:pause-launch</code>, the zone is passed via the FIS action parameter <code>availabilityZoneIdentifiers</code>, not as a target filter.</td></tr>
-    <tr><td><code>service.primary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific active Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>primary_region</code>.</td></tr>
-    <tr><td><code>service.secondary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific standby Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>secondary_region</code>.</td></tr>
-    <tr><td><code>service.start_after</code></td><td>Optional</td><td>All service blocks</td><td>Dependency list for ordered execution. When omitted, actions run in parallel by default. Use <code>&lt;service&gt;:&lt;action&gt;</code> when that action is unique in the manifest, or <code>&lt;service&gt;:&lt;action&gt;#&lt;n&gt;</code> when the same service/action appears multiple times.</td></tr>
-    <tr><td><code>service.tags</code></td><td>Usually yes</td><td>Tag-discovered actions</td><td>Comma-separated <code>key=value</code> filters used to discover real AWS resources. Current discovery logic uses AND semantics across all tags. For Aurora Global Database actions, either <code>service.tags</code>, <code>service.identifier</code>, or both may be used.</td></tr>
-    <tr><td><code>service.identifier</code></td><td>Optional</td><td><code>rds:reboot</code>, <code>rds:failover</code>, <code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Optional exact identifier used for RDS lookup. For <code>rds:reboot</code> use a DB instance identifier, for <code>rds:failover</code> use a DB cluster identifier, and for Aurora Global Database actions use the global cluster identifier. If both <code>service.identifier</code> and <code>service.tags</code> are present, both filters must match.</td></tr>
-    <tr><td><code>service.value</code></td><td>Yes for some actions</td><td><code>dns:set-value</code>, <code>dns:set-weight</code></td><td>Action-specific value payload. For <code>dns:set-value</code>, this is the target record value. For <code>dns:set-weight</code>, this is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
-    <tr><td><code>service.duration</code></td><td>Depends on action</td><td>Actions that require a time window</td><td>ISO-8601 duration such as <code>PT30M</code>. Used by actions like <code>common:wait</code>, <code>ec2:pause-launch</code>, <code>asg:pause-launch</code>, and <code>network:disrupt-connectivity</code>. For <code>ec2:stop</code>, it is optional and only controls when the framework starts the instances again after stopping them.</td></tr>
-    <tr><td><code>service.instance_count</code></td><td>Optional</td><td><code>ec2</code> instance actions</td><td>Narrows selected EC2 instances to the first N deterministic matches. Used for <code>stop</code>, <code>reboot</code>, and <code>terminate</code>.</td></tr>
-    <tr><td><code>service.iam_roles</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Comma-separated IAM role names to resolve for the EC2 capacity-error action.</td></tr>
-    <tr><td><code>service.iam_role_arns</code></td><td>Optional</td><td><code>ec2:pause-launch</code></td><td>Explicit IAM role ARNs to target instead of resolving <code>iam_roles</code>.</td></tr>
-    <tr><td><code>service.destination_region</code></td><td>Yes for <code>s3:pause-replication</code></td><td><code>s3:pause-replication</code></td><td>Region where the destination replication buckets are located.</td></tr>
-    <tr><td><code>service.destination_buckets</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of destination S3 bucket names to narrow which replication destinations are paused.</td></tr>
-    <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
-    <tr><td><code>service.timeout_seconds</code></td><td>Optional</td><td><code>s3:failover</code></td><td>Per-action timeout for waiting until the MRAP routing state reflects the requested failover. Defaults to the framework timeout when omitted.</td></tr>
-    <tr><td><code>service.from</code></td><td>Yes for ARC Aurora Global Database actions; optional legacy selector for custom actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Direction selector for ARC-backed Aurora Global Database actions. Accepted values are <code>primary</code>, <code>secondary</code>, the configured <code>primary_region</code>, or the configured <code>secondary_region</code>. When <code>service.use_arc = false</code>, prefer <code>service.target_region</code> instead.</td></tr>
-    <tr><td><code>service.target_region</code></td><td>Yes for non-ARC Aurora Global Database actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code> with <code>use_arc: false</code></td><td>Explicit member Region to promote when using the custom boto3 path for Aurora Global Database actions. This avoids ambiguity when the global database has more than two Regions.</td></tr>
-    <tr><td><code>service.use_arc</code></td><td>Optional</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Chooses the execution engine for supported Aurora Global Database actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom boto3 implementation.</td></tr>
-    <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
-    <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code>, <code>s3:failover</code></td><td>Whether the custom action waits until the target control-plane state is fully applied before completing. For <code>efs:failover</code>, this means the replication configuration has been deleted. For <code>s3:failover</code>, this means the MRAP route state shows the target Region active and all other Regions passive. Defaults to <code>true</code>.</td></tr>
-    <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
-    <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
-    <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
-    <tr><th colspan="4" align="left">Service Target Fields</th></tr>
-    <tr><td><code>service.target.cluster_identifier</code></td><td>Yes for EKS actions</td><td>EKS actions</td><td>EKS cluster name used by either the FIS pod target or the custom deployment scaler.</td></tr>
-    <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
-    <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
-    <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
-    <tr><td><code>service.target.mrap_name</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point name used with S3 Control <code>GetMultiRegionAccessPoint</code>.</td></tr>
-    <tr><td><code>service.target.mrap_alias</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point alias used to discover the MRAP through the S3 Control listing API.</td></tr>
-    <tr><td><code>service.target.mrap_arn</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point ARN used to discover the MRAP through the S3 Control listing API.</td></tr>
-    <tr><td><code>service.target.target_region</code></td><td>Yes for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>MRAP member Region that should become active after failover. The action sets this Region to traffic dial <code>100</code> and all other configured MRAP Regions to <code>0</code>.</td></tr>
-    <tr><td><code>service.target.namespace</code></td><td>Yes for pod-targeted EKS actions and <code>eks:scale-deployment</code></td><td>EKS actions</td><td>Kubernetes namespace containing the target pods or target Deployment.</td></tr>
-    <tr><td><code>service.target.selector_type</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector type passed to FIS. The current manifest examples use <code>labelSelector</code>.</td></tr>
-    <tr><td><code>service.target.selector_value</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector expression used to match pods, for example <code>app=my-service</code>.</td></tr>
-    <tr><td><code>service.target.count</code></td><td>Optional</td><td>EKS pod actions</td><td>Number of matching resources to target. Converted into FIS <code>COUNT(n)</code> selection mode.</td></tr>
-    <tr><td><code>service.target.selection_mode</code></td><td>Optional</td><td>EKS pod actions</td><td>Explicit FIS selection mode. If set, it overrides <code>count</code>.</td></tr>
-    <tr><td><code>service.target.vpc_endpoint_id</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Explicit VPC endpoint ID to target, for example <code>vpce-0123456789abcdef0</code>. Can be combined with tags and the other target filters for strict matching.</td></tr>
-    <tr><td><code>service.target.vpc_endpoint_type</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Optional VPC endpoint type filter such as <code>Interface</code> or <code>Gateway</code>.</td></tr>
-    <tr><td><code>service.target.service_name</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Optional VPC endpoint service filter such as <code>com.amazonaws.ap-southeast-1.s3</code>.</td></tr>
-    <tr><td><code>service.target.nodegroup_arn</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit managed node group ARN for the EKS node group termination action.</td></tr>
-    <tr><td><code>service.target.nodegroup_arns</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit list of managed node group ARNs for the EKS node group termination action.</td></tr>
-    <tr><td><code>service.target.deployment_name</code></td><td>Yes for <code>eks:scale-deployment</code></td><td><code>eks:scale-deployment</code></td><td>Kubernetes Deployment name to scale.</td></tr>
-    <tr><th colspan="4" align="left">Service Parameter Fields</th></tr>
-    <tr><td><code>service.parameters.max</code></td><td>Yes for <code>asg:scale</code></td><td><code>asg:scale</code></td><td>Target maximum capacity for the Auto Scaling Group.</td></tr>
-    <tr><td><code>service.parameters.min</code></td><td>Optional</td><td><code>asg:scale</code></td><td>Target minimum capacity. Defaults to <code>0</code> when omitted.</td></tr>
-    <tr><td><code>service.parameters.desired</code></td><td>Optional</td><td><code>asg:scale</code></td><td>Target desired capacity. Defaults to the configured <code>max</code> when omitted.</td></tr>
-    <tr><td><code>service.parameters.wait_for_ready</code></td><td>Optional</td><td><code>asg:scale</code>, <code>eks:scale-deployment</code></td><td>Whether the custom scaler waits until the target reaches the requested steady state.</td></tr>
-    <tr><td><code>service.parameters.timeout_seconds</code></td><td>Optional</td><td><code>asg:scale</code>, <code>eks:scale-deployment</code></td><td>Per-action timeout for custom readiness polling.</td></tr>
-    <tr><td><code>service.parameters.kubernetes_service_account</code></td><td>Yes for supported EKS pod actions</td><td>EKS pod actions</td><td>Kubernetes service account name used by the FIS pod action inside the cluster. The <code>service.parameters</code> block itself is optional, but the service account value is still required either here or as <code>service.kubernetes_service_account</code>.</td></tr>
-    <tr><td><code>service.parameters.grace_period_seconds</code></td><td>No</td><td><code>eks:delete-pod</code></td><td>Grace period before pod deletion.</td></tr>
-    <tr><td><code>service.parameters.workers</code></td><td>No</td><td><code>eks:pod-cpu-stress</code>, <code>eks:pod-io-stress</code>, <code>eks:pod-memory-stress</code></td><td>Number of stress workers.</td></tr>
-    <tr><td><code>service.parameters.percent</code></td><td>No</td><td><code>eks:pod-cpu-stress</code>, <code>eks:pod-io-stress</code>, <code>eks:pod-memory-stress</code></td><td>Stress intensity percentage.</td></tr>
-    <tr><td><code>service.parameters.max_errors_percent</code></td><td>No</td><td>EKS pod actions</td><td>Allowed percentage of errors before FIS fails the action.</td></tr>
-    <tr><td><code>service.parameters.instance_termination_percentage</code></td><td>Yes for <code>eks:terminate-nodegroup-instances</code></td><td><code>eks:terminate-nodegroup-instances</code></td><td>Percentage of managed node group instances to terminate.</td></tr>
-    <tr><td><code>service.parameters.replicas</code></td><td>Yes for <code>eks:scale-deployment</code></td><td><code>eks:scale-deployment</code></td><td>Desired absolute replica count for the target Deployment.</td></tr>
-    <tr><td><code>service.parameters.fis_pod_container_image</code></td><td>No</td><td>EKS pod actions</td><td>Optional custom container image for the helper pod used by the FIS action.</td></tr>
-    <tr><td><code>service.parameters.fis_pod_labels</code></td><td>No</td><td>EKS pod actions</td><td>Optional labels applied to the FIS orchestration pod.</td></tr>
-    <tr><td><code>service.parameters.fis_pod_annotations</code></td><td>No</td><td>EKS pod actions</td><td>Optional annotations applied to the FIS orchestration pod.</td></tr>
-    <tr><td><code>service.parameters.fis_pod_security_policy</code></td><td>No</td><td>EKS pod actions</td><td>Optional Kubernetes Security Standards policy for the FIS orchestration pod and ephemeral containers.</td></tr>
-    <tr><th colspan="4" align="left">Observability Fields</th></tr>
-    <tr><td><code>observability.start_before</code></td><td>No</td><td>All manifests</td><td>Number of minutes to collect observability before starting the action.</td></tr>
-    <tr><td><code>observability.stop_after</code></td><td>No</td><td>All manifests</td><td>Number of minutes to continue collecting observability after the action completes.</td></tr>
-    <tr><td><code>observability.health_check</code></td><td>No</td><td>All manifests</td><td>Nested HTTP health-check configuration.</td></tr>
-    <tr><td><code>observability.cloudwatch</code></td><td>No</td><td>All manifests</td><td>Nested CloudWatch metric collection configuration.</td></tr>
-    <tr><th colspan="4" align="left">Observability Health Check Fields</th></tr>
-    <tr><td><code>observability.health_check.endpoint</code></td><td>Yes when <code>observability.health_check</code> is used</td><td>Health check</td><td>HTTP endpoint to probe periodically.</td></tr>
-    <tr><td><code>observability.health_check.http_method</code></td><td>No</td><td>Health check</td><td>HTTP method to use, typically <code>get</code>.</td></tr>
-    <tr><td><code>observability.health_check.healthy_status_code</code></td><td>No</td><td>Health check</td><td>Expected healthy response code, typically <code>200</code>.</td></tr>
-    <tr><td><code>observability.health_check.interval</code></td><td>No</td><td>Health check</td><td>Polling interval in seconds.</td></tr>
-    <tr><th colspan="4" align="left">Observability CloudWatch Load Balancer Fields</th></tr>
-    <tr><td><code>observability.cloudwatch.load_balancer.type</code></td><td>Yes when load balancer metrics are used</td><td>Load balancer metrics</td><td>Load balancer type such as <code>alb</code>.</td></tr>
-    <tr><td><code>observability.cloudwatch.load_balancer.name</code></td><td>Optional</td><td>Load balancer metrics</td><td>Explicit load balancer name.</td></tr>
-    <tr><td><code>observability.cloudwatch.load_balancer.tags</code></td><td>Optional</td><td>Load balancer metrics</td><td>Tag filters used to discover the load balancer when <code>name</code> is not supplied.</td></tr>
-    <tr><td><code>observability.cloudwatch.load_balancer.metrics</code></td><td>Yes when load balancer metrics are used</td><td>Load balancer metrics</td><td>List of CloudWatch metric names to collect for the resolved load balancer.</td></tr>
+    <tr><th colspan="4" align="left">Common</th></tr>
+    <tr><td><code>common:wait</code></td><td><code>service.duration</code></td><td><code>service.use_fis</code>, <code>service.start_after</code></td><td>Uses <code>aws:fis:wait</code> by default, or Python sleep when <code>service.use_fis: false</code>.</td></tr>
+    <tr><th colspan="4" align="left">DNS</th></tr>
+    <tr><td><code>dns:set-value</code></td><td><code>service.target.hosted_zone</code>, <code>service.target.record_name</code>, <code>service.target.record_type</code>, <code>service.value</code></td><td><code>service.start_after</code></td><td>Targets exactly one simple non-alias Route 53 record.</td></tr>
+    <tr><td><code>dns:set-weight</code></td><td><code>service.target.hosted_zone</code>, <code>service.target.record_name</code>, <code>service.target.record_type</code>, <code>service.value</code></td><td><code>service.start_after</code></td><td><code>service.value</code> is a comma-separated list like <code>primary=0, secondary=100</code>.</td></tr>
+    <tr><th colspan="4" align="left">EC2</th></tr>
+    <tr><td><code>ec2:pause-launch</code></td><td><code>service.duration</code>, zone, and one of <code>service.iam_roles</code> or <code>service.iam_role_arns</code></td><td><code>service.start_after</code></td><td>AZ scope is passed through <code>availabilityZoneIdentifiers</code>.</td></tr>
+    <tr><td><code>ec2:stop</code></td><td><code>service.tags</code></td><td><code>service.duration</code>, <code>service.instance_count</code>, <code>service.use_fis</code>, <code>service.zone</code>, <code>service.start_after</code></td><td>If <code>service.duration</code> is omitted, instances stay stopped.</td></tr>
+    <tr><td><code>ec2:reboot</code></td><td><code>service.tags</code></td><td><code>service.instance_count</code>, <code>service.use_fis</code>, <code>service.duration</code>, <code>service.zone</code>, <code>service.start_after</code></td><td><code>service.duration</code> is optional and ignored.</td></tr>
+    <tr><td><code>ec2:terminate</code></td><td><code>service.tags</code></td><td><code>service.instance_count</code>, <code>service.use_fis</code>, <code>service.zone</code>, <code>service.start_after</code></td><td>Uses FIS by default or boto3 when <code>service.use_fis: false</code>.</td></tr>
+    <tr><th colspan="4" align="left">RDS</th></tr>
+    <tr><td><code>rds:reboot</code></td><td>One of <code>service.tags</code>, <code>service.identifier</code>, or both</td><td><code>service.use_fis</code>, <code>service.start_after</code></td><td><code>service.identifier</code> is the DB instance identifier.</td></tr>
+    <tr><td><code>rds:failover</code></td><td>One of <code>service.tags</code>, <code>service.identifier</code>, or both</td><td><code>service.use_fis</code>, <code>service.start_after</code></td><td><code>service.identifier</code> is the DB cluster identifier.</td></tr>
+    <tr><td><code>rds:failover-global-db</code></td><td>ARC path: selector plus <code>service.from</code> and Region pair. Custom path: selector plus <code>service.target_region</code>.</td><td><code>service.use_arc</code>, <code>service.primary_region</code>, <code>service.secondary_region</code>, <code>service.start_after</code></td><td><code>service.identifier</code> is the global cluster identifier.</td></tr>
+    <tr><td><code>rds:switchover-global-db</code></td><td>ARC path: selector plus <code>service.from</code> and Region pair. Custom path: selector plus <code>service.target_region</code>.</td><td><code>service.use_arc</code>, <code>service.primary_region</code>, <code>service.secondary_region</code>, <code>service.start_after</code></td><td>Uses the same selector rules as <code>rds:failover-global-db</code>.</td></tr>
+    <tr><th colspan="4" align="left">ASG</th></tr>
+    <tr><td><code>asg:pause-launch</code></td><td><code>service.duration</code>, zone, <code>service.tags</code></td><td><code>service.start_after</code></td><td>Zone is passed through <code>availabilityZoneIdentifiers</code>.</td></tr>
+    <tr><td><code>asg:scale</code></td><td><code>service.tags</code>, <code>service.parameters.max</code></td><td><code>service.parameters.min</code>, <code>service.parameters.desired</code>, <code>service.parameters.wait_for_ready</code>, <code>service.parameters.timeout_seconds</code>, <code>service.start_after</code></td><td><code>min</code> defaults to <code>0</code>; <code>desired</code> defaults to <code>max</code>.</td></tr>
+    <tr><th colspan="4" align="left">Network</th></tr>
+    <tr><td><code>network:disrupt-connectivity</code></td><td><code>service.duration</code>, <code>service.tags</code></td><td><code>service.zone</code>, <code>service.start_after</code></td><td>If <code>service.zone</code> is present, scope becomes availability-zone.</td></tr>
+    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td><code>service.duration</code> and at least one selector such as <code>service.tags</code> or <code>service.target.vpc_endpoint_id</code></td><td><code>service.target.vpc_endpoint_type</code>, <code>service.target.service_name</code>, <code>service.start_after</code></td><td>Targets interface VPC endpoints through the FIS binding expected by <code>aws:network:disrupt-vpc-endpoint</code>.</td></tr>
+    <tr><th colspan="4" align="left">S3</th></tr>
+    <tr><td><code>s3:pause-replication</code></td><td><code>service.tags</code>, <code>service.duration</code>, <code>service.destination_region</code></td><td><code>service.destination_buckets</code>, <code>service.prefixes</code>, <code>service.start_after</code></td><td>Narrows paused replication rules by destination bucket and prefix when supplied.</td></tr>
+    <tr><td><code>s3:failover</code></td><td>Exactly one of <code>service.target.mrap_name</code>, <code>service.target.mrap_alias</code>, or <code>service.target.mrap_arn</code>, plus <code>service.target.target_region</code></td><td><code>service.region</code>, <code>service.wait_for_ready</code>, <code>service.timeout_seconds</code>, <code>service.start_after</code></td><td><code>service.region</code> defaults to <code>eu-west-1</code>.</td></tr>
+    <tr><th colspan="4" align="left">EFS</th></tr>
+    <tr><td><code>efs:failover</code></td><td><code>service.tags</code></td><td><code>service.wait_for_ready</code>, <code>service.start_after</code></td><td>Deletes the replication configuration for the selected file system.</td></tr>
+    <tr><th colspan="4" align="left">EKS</th></tr>
+    <tr><td><code>eks:delete-pod</code></td><td>Target fields for cluster, namespace, selector, and a Kubernetes service account value</td><td><code>service.target.count</code>, <code>service.target.selection_mode</code>, <code>service.parameters.grace_period_seconds</code>, <code>service.parameters.max_errors_percent</code>, <code>service.start_after</code></td><td>Pod-targeted EKS FIS actions share the same target shape.</td></tr>
+    <tr><td><code>eks:pod-cpu-stress</code></td><td><code>service.duration</code>, the same target fields as <code>eks:delete-pod</code>, and a Kubernetes service account value</td><td><code>service.parameters.workers</code>, <code>service.parameters.percent</code>, <code>service.parameters.max_errors_percent</code>, FIS pod overrides, <code>service.start_after</code></td><td>Uses the native FIS pod CPU stress action.</td></tr>
+    <tr><td><code>eks:pod-io-stress</code></td><td><code>service.duration</code>, the same target fields as <code>eks:delete-pod</code>, and a Kubernetes service account value</td><td><code>service.parameters.workers</code>, <code>service.parameters.percent</code>, <code>service.parameters.max_errors_percent</code>, FIS pod overrides, <code>service.start_after</code></td><td>Uses the native FIS pod I/O stress action.</td></tr>
+    <tr><td><code>eks:pod-memory-stress</code></td><td><code>service.duration</code>, the same target fields as <code>eks:delete-pod</code>, and a Kubernetes service account value</td><td><code>service.parameters.workers</code>, <code>service.parameters.percent</code>, <code>service.parameters.max_errors_percent</code>, FIS pod overrides, <code>service.start_after</code></td><td>Uses the native FIS pod memory stress action.</td></tr>
+    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td><code>service.parameters.instance_termination_percentage</code> and one selector path using either <code>service.tags</code>, <code>service.target.nodegroup_arn</code>, or <code>service.target.nodegroup_arns</code></td><td><code>service.start_after</code></td><td>Targets Amazon EKS managed node groups.</td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td><code>service.target.cluster_identifier</code>, <code>service.target.namespace</code>, <code>service.target.deployment_name</code>, <code>service.parameters.replicas</code></td><td><code>service.region</code>, <code>service.parameters.wait_for_ready</code>, <code>service.parameters.timeout_seconds</code>, <code>service.start_after</code></td><td>Custom action that uses the Kubernetes API, not FIS.</td></tr>
   </tbody>
 </table>
+
+### Observability Fields
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `observability.start_before` | No | Number of minutes to collect observability before starting the action. |
+| `observability.stop_after` | No | Number of minutes to continue collecting observability after the action completes. |
+| `observability.health_check.endpoint` | Yes when used | HTTP endpoint to probe periodically. |
+| `observability.health_check.http_method` | No | HTTP method, typically `get`. |
+| `observability.health_check.healthy_status_code` | No | Expected healthy HTTP status code, typically `200`. |
+| `observability.health_check.interval` | No | Polling interval in seconds. |
+| `observability.cloudwatch.load_balancer.type` | Yes when used | Load balancer type such as `alb`. |
+| `observability.cloudwatch.load_balancer.name` | No | Explicit load balancer name. |
+| `observability.cloudwatch.load_balancer.tags` | No | Tag filters used when `name` is not supplied. |
+| `observability.cloudwatch.load_balancer.metrics` | Yes when used | List of CloudWatch metric names to collect. |
 
 Important sequencing note:
 
@@ -353,8 +355,6 @@ Only actions listed in `scripts/validations/actions.yml` currently run pre-execu
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. |
-
-`network:disrupt-vpc-endpoint` targets interface VPC endpoints through the AWS FIS VPC endpoint target binding expected by `aws:network:disrupt-vpc-endpoint`.
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
 | `rds` | `rds:reboot` | `verify_replica` | Each selected DB instance has Multi-AZ enabled or has at least one read replica. |
 | `rds` | `rds:failover` | `verify_resource_existence` | At least one DB cluster matches the selector. |
@@ -1198,3 +1198,7 @@ If another engineer or AI continues this repo, the safest default is:
 - preserve the split between FIS and ARC flows
 - keep resource discovery explicit and deterministic
 - keep result-file structure stable so reporting continues to work
+
+
+
+
