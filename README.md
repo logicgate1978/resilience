@@ -1026,6 +1026,7 @@ Current behavior:
   - bidirectional replication between the two buckets
   - one MRAP spanning both buckets
   - MRAP route state configured as active/passive with `ap-southeast-1` active
+  - one sample text object uploaded to the primary bucket after replication is configured
 - `commands/s3/destroy_s3_mrap_stack.sh` tears down that S3 MRAP stack using the saved local state by default.
 
 Current behavior:
@@ -1038,6 +1039,8 @@ Current behavior:
   - `environment=development`
   - `project=clouddash`
 - writes stack state to `commands/s3/.state/current_s3_mrap_stack.txt`
+- writes a sample text file to `commands/s3/.state/sample_replication_object.txt`
+- the destroy helper empties both buckets before deleting them
 
 Example:
 

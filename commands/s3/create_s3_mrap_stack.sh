@@ -13,6 +13,8 @@ PROJECT_TAG_VALUE="clouddash"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${SCRIPT_DIR}/.state"
 STATE_FILE="${STATE_DIR}/current_s3_mrap_stack.txt"
+SAMPLE_FILE="${STATE_DIR}/sample_replication_object.txt"
+SAMPLE_OBJECT_KEY="sample_replication_object.txt"
 
 PRIMARY_REGION="${DEFAULT_PRIMARY_REGION}"
 SECONDARY_REGION="${DEFAULT_SECONDARY_REGION}"
@@ -114,7 +116,26 @@ MRAP_ALIAS=${MRAP_ALIAS}
 MRAP_ARN=${MRAP_ARN}
 REPLICATION_ROLE_NAME=${REPLICATION_ROLE_NAME}
 REPLICATION_POLICY_NAME=${REPLICATION_POLICY_NAME}
+SAMPLE_FILE=${SAMPLE_FILE}
+SAMPLE_OBJECT_KEY=${SAMPLE_OBJECT_KEY}
 EOF
+}
+
+create_sample_file() {
+  mkdir -p "${STATE_DIR}"
+  cat > "${SAMPLE_FILE}" <<EOF
+This is a sample replication object for the resilience S3 MRAP test stack.
+Primary region: ${PRIMARY_REGION}
+Secondary region: ${SECONDARY_REGION}
+Created at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+}
+
+upload_sample_file() {
+  echo "Uploading sample object '${SAMPLE_OBJECT_KEY}' to primary bucket '${PRIMARY_BUCKET}'..."
+  aws s3 cp "${SAMPLE_FILE}" "s3://${PRIMARY_BUCKET}/${SAMPLE_OBJECT_KEY}" \
+    --region "${PRIMARY_REGION}" \
+    >/dev/null
 }
 
 bucket_exists() {
@@ -219,9 +240,9 @@ EOF
 EOF
 
   if aws iam get-role --role-name "${REPLICATION_ROLE_NAME}" >/dev/null 2>&1; then
-    echo "Replication role already exists: ${REPLICATION_ROLE_NAME}"
+    echo "Replication role already exists: ${REPLICATION_ROLE_NAME}" >&2
   else
-    echo "Creating replication IAM role '${REPLICATION_ROLE_NAME}'..."
+    echo "Creating replication IAM role '${REPLICATION_ROLE_NAME}'..." >&2
     aws iam create-role \
       --role-name "${REPLICATION_ROLE_NAME}" \
       --assume-role-policy-document "file://${trust_file}" \
@@ -476,6 +497,9 @@ ROLE_ARN="$(ensure_replication_role)"
 echo "Configuring bidirectional replication..."
 put_replication_config "${PRIMARY_BUCKET}" "${PRIMARY_REGION}" "${SECONDARY_BUCKET}" "${SECONDARY_REGION}" "${ROLE_ARN}"
 put_replication_config "${SECONDARY_BUCKET}" "${SECONDARY_REGION}" "${PRIMARY_BUCKET}" "${PRIMARY_REGION}" "${ROLE_ARN}"
+
+create_sample_file
+upload_sample_file
 
 ensure_mrap
 set_active_passive_routes

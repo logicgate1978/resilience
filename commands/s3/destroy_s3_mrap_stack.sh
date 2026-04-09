@@ -11,6 +11,7 @@ MANAGEMENT_REGION="us-west-2"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="${SCRIPT_DIR}/.state"
 STATE_FILE="${STATE_DIR}/current_s3_mrap_stack.txt"
+SAMPLE_FILE="${STATE_DIR}/sample_replication_object.txt"
 
 PRIMARY_REGION="${DEFAULT_PRIMARY_REGION}"
 SECONDARY_REGION="${DEFAULT_SECONDARY_REGION}"
@@ -323,6 +324,7 @@ delete_bucket "${SECONDARY_BUCKET}" "${SECONDARY_REGION}"
 delete_replication_role
 
 rm -f "${STATE_FILE}"
+rm -f "${SAMPLE_FILE}"
 
 echo
 echo "S3 MRAP stack has been removed."
