@@ -1003,6 +1003,25 @@ pip install -r scripts/requirements.txt
 
 The repository also contains helper provisioning scripts under `commands/`.
 
+As a convention, every new `create_*.sh` helper under `commands/` should be paired with a corresponding `destroy_*.sh` helper so test resources can be cleaned up predictably.
+
+### Network Helper
+
+- `commands/network/create_vpc_endpoint.sh` creates or reuses a VPC endpoint helper resource for network resilience testing.
+- `commands/network/destroy_vpc_endpoint.sh` deletes the current helper VPC endpoint and its helper security group using the saved state file by default.
+
+Current behavior:
+
+- defaults to Region `ap-southeast-1`
+- defaults to an `Interface` endpoint for service `com.amazonaws.<region>.s3`
+- uses the Region's default VPC and default subnets unless overrides are supplied
+- creates or reuses a security group that allows TCP/443 from the VPC CIDR
+- tags the VPC endpoint and security group with:
+  - `environment=development`
+  - `project=clouddash`
+- writes local state to `commands/network/.state/current_vpc_endpoint.txt`
+- the destroy helper reads that state file, deletes the endpoint first, then removes the helper security group when it is no longer referenced
+
 ### EKS Helpers
 
 - `commands/eks/` contains cluster creation, teardown, access-grant, and sample workload scripts for EKS testing.
