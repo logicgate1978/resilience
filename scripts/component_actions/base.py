@@ -17,6 +17,17 @@ class CustomComponentAction(ABC):
     def supports(self, service_name: str, action: str) -> bool:
         return normalize_service_name(service_name) == self.service_name and action in self.action_names
 
+    def default_region(
+        self,
+        *,
+        manifest: Dict[str, Any],
+        svc: Dict[str, Any],
+        fallback_region: Optional[str],
+    ) -> Optional[str]:
+        _ = manifest
+        _ = svc
+        return fallback_region
+
     @abstractmethod
     def build_plan_item(
         self,

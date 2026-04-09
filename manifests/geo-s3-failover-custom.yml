@@ -1,0 +1,10 @@
+services:
+- name: s3
+  action: failover
+  # region is optional for s3:failover and defaults to eu-west-1.
+  region: eu-west-1
+  target:
+    mrap_name: my-mrap
+    target_region: ap-southeast-2
+  wait_for_ready: true
+  timeout_seconds: 300

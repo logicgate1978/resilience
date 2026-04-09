@@ -44,3 +44,7 @@ actions:
   - action: s3:pause-relication
     validations:
       - verify_resource_existence
+  - action: s3:failover
+    validations:
+      - verify_mrap_selector
+      - verify_mrap_failover_state

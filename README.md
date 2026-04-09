@@ -210,6 +210,7 @@ Responsibilities:
     <tr><td><code>network:disrupt-connectivity</code></td><td>FIS</td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
     <tr><th colspan="4" align="left">S3</th></tr>
     <tr><td><code>s3:pause-replication</code></td><td>FIS</td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
+    <tr><td><code>s3:failover</code></td><td>Custom</td><td>Fail over an S3 Multi-Region Access Point by making one target Region active and all other configured MRAP regions passive.</td><td></td></tr>
     <tr><th colspan="4" align="left">EFS</th></tr>
     <tr><td><code>efs:failover</code></td><td>Custom</td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable.</td><td></td></tr>
     <tr><th colspan="4" align="left">EKS</th></tr>
@@ -235,7 +236,7 @@ Responsibilities:
   </thead>
   <tbody>
     <tr><th colspan="4" align="left">Top-Level Fields</th></tr>
-    <tr><td><code>region</code></td><td>Optional default</td><td>FIS actions, single-Region custom actions</td><td>Default AWS Region for execution, resource discovery, and observability. A service-level <code>service.region</code> overrides it. For custom-only global actions such as Route 53 DNS, the framework can fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when no region is declared.</td></tr>
+    <tr><td><code>region</code></td><td>Optional default</td><td>FIS actions, single-Region custom actions</td><td>Default AWS Region for execution, resource discovery, and observability. A service-level <code>service.region</code> overrides it. For <code>s3:failover</code>, this is the S3 MRAP failover-control endpoint Region and defaults to <code>eu-west-1</code> when omitted. For custom-only global actions such as Route 53 DNS, the framework can otherwise fall back to <code>AWS_REGION</code>, <code>AWS_DEFAULT_REGION</code>, or <code>us-east-1</code> when no region is declared.</td></tr>
     <tr><td><code>zone</code></td><td>Optional default</td><td>AZ-scoped actions</td><td>Default Availability Zone scope. A service-level <code>service.zone</code> overrides it.</td></tr>
     <tr><td><code>primary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default current active Region for cross-Region Aurora Global Database actions. A service-level <code>service.primary_region</code> overrides it.</td></tr>
     <tr><td><code>secondary_region</code></td><td>Optional default</td><td>Aurora Global Database actions</td><td>Default standby Region for cross-Region Aurora Global Database actions. A service-level <code>service.secondary_region</code> overrides it.</td></tr>
@@ -244,7 +245,7 @@ Responsibilities:
     <tr><th colspan="4" align="left">Service Block Fields</th></tr>
     <tr><td><code>service.name</code></td><td>Yes</td><td>All service blocks</td><td>Logical service name such as <code>common</code>, <code>ec2</code>, <code>rds</code>, <code>asg</code>, <code>network</code>, <code>s3</code>, or <code>eks</code>.</td></tr>
     <tr><td><code>service.action</code></td><td>Yes</td><td>All service blocks</td><td>Action to run for that service, for example <code>terminate</code>, <code>reboot</code>, <code>failover</code>, or <code>delete-pod</code>.</td></tr>
-    <tr><td><code>service.region</code></td><td>Optional</td><td>Region-scoped actions</td><td>Action-specific Region override. When present, it takes precedence over top-level <code>region</code>.</td></tr>
+    <tr><td><code>service.region</code></td><td>Optional</td><td>Region-scoped actions</td><td>Action-specific Region override. When present, it takes precedence over top-level <code>region</code>. For <code>s3:failover</code>, the allowed values are the S3 MRAP failover-control Regions, and the default is <code>eu-west-1</code>.</td></tr>
     <tr><td><code>service.zone</code></td><td>Optional</td><td>AZ-scoped actions</td><td>Action-specific Availability Zone override. When present, it takes precedence over top-level <code>zone</code>. For <code>asg:pause-launch</code>, the zone is passed via the FIS action parameter <code>availabilityZoneIdentifiers</code>, not as a target filter.</td></tr>
     <tr><td><code>service.primary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific active Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>primary_region</code>.</td></tr>
     <tr><td><code>service.secondary_region</code></td><td>Optional</td><td>Aurora Global Database actions</td><td>Action-specific standby Region override for Aurora Global Database actions. When present, it takes precedence over top-level <code>secondary_region</code>.</td></tr>
@@ -259,11 +260,12 @@ Responsibilities:
     <tr><td><code>service.destination_region</code></td><td>Yes for <code>s3:pause-replication</code></td><td><code>s3:pause-replication</code></td><td>Region where the destination replication buckets are located.</td></tr>
     <tr><td><code>service.destination_buckets</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of destination S3 bucket names to narrow which replication destinations are paused.</td></tr>
     <tr><td><code>service.prefixes</code></td><td>Optional</td><td><code>s3:pause-replication</code></td><td>Optional list of S3 object key prefixes to narrow replication rules that are paused.</td></tr>
+    <tr><td><code>service.timeout_seconds</code></td><td>Optional</td><td><code>s3:failover</code></td><td>Per-action timeout for waiting until the MRAP routing state reflects the requested failover. Defaults to the framework timeout when omitted.</td></tr>
     <tr><td><code>service.from</code></td><td>Yes for ARC Aurora Global Database actions; optional legacy selector for custom actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Direction selector for ARC-backed Aurora Global Database actions. Accepted values are <code>primary</code>, <code>secondary</code>, the configured <code>primary_region</code>, or the configured <code>secondary_region</code>. When <code>service.use_arc = false</code>, prefer <code>service.target_region</code> instead.</td></tr>
     <tr><td><code>service.target_region</code></td><td>Yes for non-ARC Aurora Global Database actions</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code> with <code>use_arc: false</code></td><td>Explicit member Region to promote when using the custom boto3 path for Aurora Global Database actions. This avoids ambiguity when the global database has more than two Regions.</td></tr>
     <tr><td><code>service.use_arc</code></td><td>Optional</td><td><code>rds:failover-global-db</code>, <code>rds:switchover-global-db</code></td><td>Chooses the execution engine for supported Aurora Global Database actions. <code>true</code> uses ARC Region switch; <code>false</code> uses a custom boto3 implementation.</td></tr>
     <tr><td><code>service.use_fis</code></td><td>Optional</td><td><code>common:wait</code>, <code>ec2:stop</code>, <code>ec2:reboot</code>, <code>ec2:terminate</code>, <code>rds:reboot</code>, <code>rds:failover</code></td><td>Chooses the execution engine for supported dual-path actions. Defaults to <code>true</code>. When set to <code>false</code>, the framework uses its custom Python or boto3 implementation instead of FIS.</td></tr>
-    <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code></td><td>Whether the EFS failover action waits until the replication configuration is fully deleted before completing. Defaults to <code>true</code>.</td></tr>
+    <tr><td><code>service.wait_for_ready</code></td><td>Optional</td><td><code>efs:failover</code>, <code>s3:failover</code></td><td>Whether the custom action waits until the target control-plane state is fully applied before completing. For <code>efs:failover</code>, this means the replication configuration has been deleted. For <code>s3:failover</code>, this means the MRAP route state shows the target Region active and all other Regions passive. Defaults to <code>true</code>.</td></tr>
     <tr><td><code>service.target</code></td><td>Required for structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested target object for actions that need more than tag-based selection.</td></tr>
     <tr><td><code>service.parameters</code></td><td>Required for many structured actions</td><td><code>eks</code> structured actions, custom actions</td><td>Nested action-parameter object for actions that require extra runtime parameters.</td></tr>
     <tr><td><code>service.kubernetes_service_account</code></td><td>Optional container for a required value</td><td>Supported EKS pod actions</td><td>Can be supplied directly on the service block instead of under <code>service.parameters.kubernetes_service_account</code>. The service account value itself is still required for supported EKS pod actions.</td></tr>
@@ -272,6 +274,10 @@ Responsibilities:
     <tr><td><code>service.target.hosted_zone</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Hosted zone name used to resolve the Route 53 hosted zone, for example <code>example.com</code>.</td></tr>
     <tr><td><code>service.target.record_name</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Fully qualified DNS record name, for example <code>dev.example.com</code>.</td></tr>
     <tr><td><code>service.target.record_type</code></td><td>Yes for DNS actions</td><td>Route 53 DNS actions</td><td>Route 53 record type such as <code>A</code>, <code>AAAA</code>, or <code>CNAME</code>.</td></tr>
+    <tr><td><code>service.target.mrap_name</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point name used with S3 Control <code>GetMultiRegionAccessPoint</code>.</td></tr>
+    <tr><td><code>service.target.mrap_alias</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point alias used to discover the MRAP through the S3 Control listing API.</td></tr>
+    <tr><td><code>service.target.mrap_arn</code></td><td>Exactly one MRAP selector is required for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>Multi-Region Access Point ARN used to discover the MRAP through the S3 Control listing API.</td></tr>
+    <tr><td><code>service.target.target_region</code></td><td>Yes for <code>s3:failover</code></td><td><code>s3:failover</code></td><td>MRAP member Region that should become active after failover. The action sets this Region to traffic dial <code>100</code> and all other configured MRAP Regions to <code>0</code>.</td></tr>
     <tr><td><code>service.target.namespace</code></td><td>Yes for pod-targeted EKS actions and <code>eks:scale-deployment</code></td><td>EKS actions</td><td>Kubernetes namespace containing the target pods or target Deployment.</td></tr>
     <tr><td><code>service.target.selector_type</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector type passed to FIS. The current manifest examples use <code>labelSelector</code>.</td></tr>
     <tr><td><code>service.target.selector_value</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector expression used to match pods, for example <code>app=my-service</code>.</td></tr>
@@ -630,6 +636,27 @@ The custom EFS failover action:
    - or polls until the replication configuration is no longer returned by `DescribeReplicationConfigurations`
 
 If your tag selection matches multiple file systems, the action operates on all of them. It fails fast when any selected file system does not have replication configured.
+
+### Current `s3:failover` Behavior
+
+The custom S3 MRAP failover action:
+
+1. resolves the Multi-Region Access Point from exactly one selector:
+   - `service.target.mrap_name`
+   - `service.target.mrap_alias`
+   - `service.target.mrap_arn`
+2. reads the current MRAP route state through S3 Control
+3. validates that:
+   - the MRAP is `READY`
+   - the requested `service.target.target_region` exists in the MRAP
+   - the MRAP is currently active/passive, not active/active
+   - the target Region is not already active
+4. submits new route updates so the target Region becomes active with traffic dial `100` and all other configured MRAP Regions become passive with traffic dial `0`
+5. either:
+   - completes immediately when `service.wait_for_ready = false`
+   - or polls until the MRAP route state reflects the requested failover
+
+The action uses S3 MRAP failover-control endpoints. If `service.region` is omitted, it defaults to `eu-west-1`.
 
 ### Current `asg:scale` Behavior
 

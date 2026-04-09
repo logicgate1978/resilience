@@ -207,7 +207,11 @@ def build_custom_execution_plan(
         if handler is None:
             raise ValueError(f"Unsupported custom component action: {service_name}:{action}")
 
-        service_region = resolve_service_region(manifest, svc, default=region)
+        service_region = resolve_service_region(
+            manifest,
+            svc,
+            default=handler.default_region(manifest=manifest, svc=svc, fallback_region=region),
+        )
         item = handler.build_plan_item(
             manifest=manifest,
             svc=svc,
