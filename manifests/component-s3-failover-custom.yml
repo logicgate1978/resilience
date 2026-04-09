@@ -4,7 +4,7 @@ services:
   # region is optional for s3:failover and defaults to eu-west-1.
   region: eu-west-1
   target:
-    mrap_name: my-mrap
+    mrap_name: resilience-s3-mrap-mrap
     target_region: ap-southeast-2
   wait_for_ready: true
   timeout_seconds: 300
