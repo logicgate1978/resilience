@@ -40,7 +40,7 @@ Important manifest rule:
 
 Execution path:
 
-1. `scripts/fis.py` loads the manifest
+1. `scripts/main.py` loads the manifest
 2. The action is routed to either:
    - `scripts/template_generator/` for native FIS actions
    - `scripts/component_actions/` for custom actions and supported `use_fis: false` fallbacks
@@ -59,7 +59,7 @@ Top-level and service-level scope:
 
 Execution path:
 
-1. `scripts/fis.py` detects that all actions in the manifest are ARC-backed
+1. `scripts/main.py` detects that all actions in the manifest are ARC-backed
 2. `scripts/region_switch.py` validates the manifest
 3. `scripts/resource.py` discovers the impacted resources for reporting
 4. `scripts/region_switch.py` builds a region execution plan
@@ -78,7 +78,7 @@ Important design point:
 
 ### Core Orchestrator
 
-- `scripts/fis.py`
+- `scripts/main.py`
 
 Responsibilities:
 
@@ -529,7 +529,7 @@ This is deliberate. The current design prefers deterministic failure over ambigu
 
 ### Observability Choice for Region Tests
 
-For region tests, `scripts/fis.py` currently passes an empty impacted-resource list into `start_observability_collectors()`.
+For region tests, `scripts/main.py` currently passes an empty impacted-resource list into `start_observability_collectors()`.
 
 Why:
 
@@ -607,7 +607,7 @@ Design rules:
 
 1. Native FIS actions stay in `scripts/template_generator/`.
 2. Custom-only component actions live under `scripts/component_actions/`.
-3. `scripts/fis.py` routes a manifest to one engine family: FIS, ARC, or custom.
+3. `scripts/main.py` routes a manifest to one engine family: FIS, ARC, or custom.
 4. Mixing FIS, ARC, and custom actions in the same manifest is intentionally not supported.
 
 ### Current `ec2` boto3 Fallback Behavior
@@ -966,7 +966,7 @@ A typical run creates some or all of:
 
 ### Default Arguments from `.env`
 
-The canonical env file is `scripts/.env`, which contains default values for `scripts/fis.py`.
+The canonical env file is `scripts/.env`, which contains default values for `scripts/main.py`.
 
 Current supported keys:
 
@@ -981,8 +981,8 @@ Current supported keys:
 Behavior:
 
 - if a CLI argument is provided, it wins
-- if a CLI argument is omitted, `fis.py` falls back to `.env`
-- if the key is not present in `.env`, `fis.py` falls back to its hardcoded default
+- if a CLI argument is omitted, `main.py` falls back to `.env`
+- if the key is not present in `.env`, `main.py` falls back to its hardcoded default
 
 ### Install Dependencies
 
@@ -1085,7 +1085,7 @@ Example:
 From `scripts/`:
 
 ```powershell
-python fis.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
+python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
 ```
 
 ### Run a Region Test
@@ -1093,7 +1093,7 @@ python fis.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role
 From `scripts/`:
 
 ```powershell
-python fis.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
+python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 ```
 
 ### Dry Run
@@ -1101,7 +1101,7 @@ python fis.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 Dry run writes payload and discovery artifacts but does not create or execute the remote action:
 
 ```powershell
-python fis.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn> --dry-run
+python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn> --dry-run
 ```
 
 ### Runtime Logging

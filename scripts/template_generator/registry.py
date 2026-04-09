@@ -245,7 +245,7 @@ def generate_template_payload(
         "targets": targets,
         "actions": actions,
         "experimentOptions": {"emptyTargetResolutionMode": "skip"},
-        "tags": {"managed-by": "fis.py"},
+        "tags": {"managed-by": "main.py"},
     }
 
 

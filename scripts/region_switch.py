@@ -462,7 +462,7 @@ def _build_arc_execution_item(
             "primaryRegion": primary_region,
             "workflows": workflows,
             "tags": {
-                "managed-by": "fis.py",
+                "managed-by": "main.py",
                 "service": "rds",
                 "action": action,
             },

@@ -36,7 +36,7 @@ from utility import (
 )
 from validations import ValidationError, validate_manifest_services
 
-from chart import generate_report  # NEW
+from chart import generate_report
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
