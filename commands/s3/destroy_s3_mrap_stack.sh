@@ -103,6 +103,15 @@ bucket_exists() {
   aws s3api head-bucket --bucket "${bucket}" --region "${region}" >/dev/null 2>&1
 }
 
+normalize_aws_text_output() {
+  local value="$1"
+  if [[ "${value}" == "None" || "${value}" == "null" ]]; then
+    echo ""
+    return 0
+  fi
+  echo "${value}"
+}
+
 empty_bucket() {
   local bucket="$1"
   local region="$2"
@@ -125,6 +134,9 @@ empty_bucket() {
       --region "${region}" \
       --query 'DeleteMarkers[].[Key,VersionId]' \
       --output text 2>/dev/null || true)"
+
+    versions="$(normalize_aws_text_output "${versions}")"
+    markers="$(normalize_aws_text_output "${markers}")"
 
     if [[ -z "${versions}" && -z "${markers}" ]]; then
       break
