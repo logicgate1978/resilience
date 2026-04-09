@@ -208,6 +208,7 @@ Responsibilities:
     <tr><td><code>asg:scale</code></td><td>Custom</td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td></tr>
     <tr><th colspan="4" align="left">Network</th></tr>
     <tr><td><code>network:disrupt-connectivity</code></td><td>FIS</td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td></tr>
+    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td>FIS</td><td>Disrupt traffic through selected VPC endpoints.</td><td><code>aws:network:disrupt-vpc-endpoint</code></td></tr>
     <tr><th colspan="4" align="left">S3</th></tr>
     <tr><td><code>s3:pause-replication</code></td><td>FIS</td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td></tr>
     <tr><td><code>s3:failover</code></td><td>Custom</td><td>Fail over an S3 Multi-Region Access Point by making one target Region active and all other configured MRAP regions passive.</td><td></td></tr>
@@ -283,6 +284,9 @@ Responsibilities:
     <tr><td><code>service.target.selector_value</code></td><td>Yes for pod-targeted EKS actions</td><td>EKS pod actions</td><td>Selector expression used to match pods, for example <code>app=my-service</code>.</td></tr>
     <tr><td><code>service.target.count</code></td><td>Optional</td><td>EKS pod actions</td><td>Number of matching resources to target. Converted into FIS <code>COUNT(n)</code> selection mode.</td></tr>
     <tr><td><code>service.target.selection_mode</code></td><td>Optional</td><td>EKS pod actions</td><td>Explicit FIS selection mode. If set, it overrides <code>count</code>.</td></tr>
+    <tr><td><code>service.target.vpc_endpoint_id</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Explicit VPC endpoint ID to target, for example <code>vpce-0123456789abcdef0</code>. Can be combined with tags and the other target filters for strict matching.</td></tr>
+    <tr><td><code>service.target.vpc_endpoint_type</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Optional VPC endpoint type filter such as <code>Interface</code> or <code>Gateway</code>.</td></tr>
+    <tr><td><code>service.target.service_name</code></td><td>Optional</td><td><code>network:disrupt-vpc-endpoint</code></td><td>Optional VPC endpoint service filter such as <code>com.amazonaws.ap-southeast-1.s3</code>.</td></tr>
     <tr><td><code>service.target.nodegroup_arn</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit managed node group ARN for the EKS node group termination action.</td></tr>
     <tr><td><code>service.target.nodegroup_arns</code></td><td>Optional</td><td><code>eks:terminate-nodegroup-instances</code></td><td>Explicit list of managed node group ARNs for the EKS node group termination action.</td></tr>
     <tr><td><code>service.target.deployment_name</code></td><td>Yes for <code>eks:scale-deployment</code></td><td><code>eks:scale-deployment</code></td><td>Kubernetes Deployment name to scale.</td></tr>
@@ -348,6 +352,7 @@ Only actions listed in `scripts/validations/actions.yml` currently run pre-execu
 | `efs` | `efs:failover` | `verify_replication_configuration_exists` | Each selected EFS file system has an existing replication configuration that can be deleted. |
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
+| `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. |
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
 | `rds` | `rds:reboot` | `verify_replica` | Each selected DB instance has Multi-AZ enabled or has at least one read replica. |
 | `rds` | `rds:failover` | `verify_resource_existence` | At least one DB cluster matches the selector. |

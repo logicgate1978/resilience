@@ -281,6 +281,42 @@ def _collect_s3_buckets(session, region: str, tags: Dict[str, str]) -> List[str]
     return arns
 
 
+def _collect_vpc_endpoints(
+    session,
+    region: str,
+    tags: Dict[str, str],
+    *,
+    vpc_endpoint_id: Optional[str] = None,
+    vpc_endpoint_type: Optional[str] = None,
+    service_name: Optional[str] = None,
+) -> List[str]:
+    ec2 = session.client("ec2", region_name=region)
+    sts = session.client("sts")
+    account_id = get_account_id(sts)
+
+    filters = []
+    for k, v in tags.items():
+        filters.append({"Name": f"tag:{k}", "Values": [v]})
+    if vpc_endpoint_type:
+        filters.append({"Name": "vpc-endpoint-type", "Values": [vpc_endpoint_type]})
+    if service_name:
+        filters.append({"Name": "service-name", "Values": [service_name]})
+
+    kwargs: Dict[str, Any] = {"Filters": filters} if filters else {}
+    if vpc_endpoint_id:
+        kwargs["VpcEndpointIds"] = [vpc_endpoint_id]
+
+    arns: List[str] = []
+    paginator = ec2.get_paginator("describe_vpc_endpoints")
+    for page in paginator.paginate(**kwargs):
+        for endpoint in page.get("VpcEndpoints", []):
+            endpoint_id = endpoint.get("VpcEndpointId")
+            if not endpoint_id:
+                continue
+            arns.append(f"arn:aws:ec2:{region}:{account_id}:vpc-endpoint/{endpoint_id}")
+    return arns
+
+
 def _collect_efs_file_systems(session, region: str, tags: Dict[str, str]) -> List[str]:
     efs = session.client("efs", region_name=region)
     arns: List[str] = []
@@ -339,6 +375,19 @@ def collect_service_resource_arns(
 
     if name == "network" and action == "disrupt-connectivity":
         return _collect_subnets(session, region, zone, tags)
+
+    if name == "network" and action == "disrupt-vpc-endpoint":
+        target = svc.get("target") or {}
+        if not isinstance(target, dict):
+            target = {}
+        return _collect_vpc_endpoints(
+            session,
+            region,
+            tags,
+            vpc_endpoint_id=str(target.get("vpc_endpoint_id") or "").strip() or None,
+            vpc_endpoint_type=str(target.get("vpc_endpoint_type") or "").strip() or None,
+            service_name=str(target.get("service_name") or "").strip() or None,
+        )
 
     if name == "rds" and action == "reboot":
         return _collect_rds_instances(session, region, zone, tags, identifier=identifier or None)

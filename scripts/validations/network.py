@@ -1,0 +1,14 @@
+from validations.base import BaseServiceValidator, ValidationContext
+
+
+class NetworkValidator(BaseServiceValidator):
+    service_name = "network"
+
+    def verify_resource_existence(self, context: ValidationContext) -> None:
+        arns = context.get_selected_resource_arns()
+        if arns:
+            return
+        self.fail(
+            context,
+            f"no resources matched the selection criteria ({context.selection_summary()}).",
+        )
