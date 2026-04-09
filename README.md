@@ -353,6 +353,8 @@ Only actions listed in `scripts/validations/actions.yml` currently run pre-execu
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. |
+
+`network:disrupt-vpc-endpoint` targets interface VPC endpoints through the AWS FIS VPC endpoint target binding expected by `aws:network:disrupt-vpc-endpoint`.
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
 | `rds` | `rds:reboot` | `verify_replica` | Each selected DB instance has Multi-AZ enabled or has at least one read replica. |
 | `rds` | `rds:failover` | `verify_resource_existence` | At least one DB cluster matches the selector. |

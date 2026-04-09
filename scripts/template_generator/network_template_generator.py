@@ -17,7 +17,7 @@ class NetworkTemplateGenerator(ServiceTemplateGenerator):
     }
     target_spec_map = {
         "disrupt-connectivity": {"resourceType": "aws:ec2:subnet", "target_key": "Subnets"},
-        "disrupt-vpc-endpoint": {"resourceType": "aws:ec2:vpc-endpoint", "target_key": "VpcEndpoints"},
+        "disrupt-vpc-endpoint": {"resourceType": "aws:ec2:vpc-endpoint", "target_key": "VPCEndpoints"},
     }
 
     def get_resource_arns(self, *, manifest: Dict[str, Any], svc: ManifestService):
