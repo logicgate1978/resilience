@@ -371,11 +371,12 @@ ensure_mrap() {
       --region "${MANAGEMENT_REGION}" \
       --query 'RequestTokenARN' \
       --output text)"
-    wait_for_mrap_operation "${request_token_arn}"
+    echo "MRAP create request token: ${request_token_arn}"
   else
     echo "MRAP already exists: ${MRAP_NAME}"
   fi
 
+  echo "Waiting for MRAP '${MRAP_NAME}' to become READY..."
   wait_for_mrap_ready
 
   MRAP_ALIAS="$(aws s3control get-multi-region-access-point \

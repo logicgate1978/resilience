@@ -1025,7 +1025,7 @@ Current behavior:
   - one bucket in `ap-southeast-2`
   - bidirectional replication between the two buckets
   - one MRAP spanning both buckets
-  - MRAP route state configured as active/passive with `ap-southeast-1` active
+  - MRAP route state updated after creation so it becomes active/passive with `ap-southeast-1` active
   - one sample text object uploaded to the primary bucket after replication is configured
 - `commands/s3/destroy_s3_mrap_stack.sh` tears down that S3 MRAP stack using the saved local state by default.
 
