@@ -171,6 +171,7 @@ ensure_security_group() {
     --region "${REGION}" \
     --group-id "${group_id}" \
     --ip-permissions "IpProtocol=tcp,FromPort=443,ToPort=443,IpRanges=[{CidrIp=${VPC_CIDR_BLOCK},Description=Allow HTTPS from VPC CIDR}]" \
+    >/dev/null \
     2>"${stderr_file}"; then
     if ! grep -q "InvalidPermission.Duplicate" "${stderr_file}"; then
       cat "${stderr_file}" >&2
