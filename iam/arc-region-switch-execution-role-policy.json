@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DescribeAuroraGlobalDatabaseState",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeGlobalClusters",
+        "rds:DescribeDBClusters"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "FailoverOrSwitchoverAuroraGlobalDatabase",
+      "Effect": "Allow",
+      "Action": [
+        "rds:FailoverGlobalCluster",
+        "rds:SwitchoverGlobalCluster"
+      ],
+      "Resource": [
+        "arn:aws:rds::123456789012:global-cluster:your-global-cluster-id",
+        "arn:aws:rds:ap-southeast-1:123456789012:cluster:your-primary-cluster-id",
+        "arn:aws:rds:ap-southeast-2:123456789012:cluster:your-secondary-cluster-id"
+      ]
+    }
+  ]
+}

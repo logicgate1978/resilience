@@ -1,0 +1,162 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Ec2PauseLaunchInjectApiError",
+      "Effect": "Allow",
+      "Action": "ec2:InjectApiError",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:FisActionId": "aws:ec2:api-insufficient-instance-capacity-error"
+        },
+        "ForAllValues:ArnLike": {
+          "ec2:FisTargetArns": [
+            "arn:aws:iam::123456789012:role/BAU",
+            "arn:aws:iam::123456789012:role/Admin",
+            "arn:aws:iam::123456789012:role/scb-user-instance-role"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "AsgPauseLaunchInjectApiError",
+      "Effect": "Allow",
+      "Action": "ec2:InjectApiError",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:FisActionId": "aws:ec2:asg-insufficient-instance-capacity-error"
+        },
+        "ForAllValues:ArnLike": {
+          "ec2:FisTargetArns": [
+            "arn:aws:autoscaling:*:123456789012:autoScalingGroup:*:autoScalingGroupName/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DescribeAutoScalingGroups",
+      "Effect": "Allow",
+      "Action": "autoscaling:DescribeAutoScalingGroups",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Ec2InstanceFaultActions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:StartInstances",
+        "ec2:RebootInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:aws:ec2:*:123456789012:instance/*"
+    },
+    {
+      "Sid": "DescribeEc2InstancesAndSubnets",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeSubnets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RdsFaultActions",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RebootDBInstance",
+        "rds:FailoverDBCluster"
+      ],
+      "Resource": [
+        "arn:aws:rds:*:123456789012:db:*",
+        "arn:aws:rds:*:123456789012:cluster:*"
+      ]
+    },
+    {
+      "Sid": "DescribeRdsAndTagResources",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBClusters",
+        "tag:GetResources"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EksDescribeActions",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:DescribeNodegroup"
+      ],
+      "Resource": [
+        "arn:aws:eks:*:123456789012:cluster/*",
+        "arn:aws:eks:*:123456789012:nodegroup/*/*/*"
+      ]
+    },
+    {
+      "Sid": "NetworkFaultActions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateNetworkAcl",
+        "ec2:CreateNetworkAclEntry",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateTags",
+        "ec2:DeleteNetworkAcl",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:DescribeNetworkAcls",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcEndpoints",
+        "ec2:DescribeVpcs",
+        "ec2:GetManagedPrefixListEntries",
+        "ec2:ModifyVpcEndpoint",
+        "ec2:ReplaceNetworkAclAssociation",
+        "ec2:RevokeSecurityGroupEgress"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3PauseReplication",
+      "Effect": "Allow",
+      "Action": "s3:PauseReplication",
+      "Resource": [
+        "arn:aws:s3:::your-source-bucket-1",
+        "arn:aws:s3:::your-source-bucket-2"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "s3:DestinationRegion": [
+            "ap-southeast-1",
+            "ap-southeast-2"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "S3ReplicationConfigOnlyForFisPauseReplication",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutReplicationConfiguration",
+        "s3:GetReplicationConfiguration"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-source-bucket-1",
+        "arn:aws:s3:::your-source-bucket-2"
+      ],
+      "Condition": {
+        "BoolIfExists": {
+          "s3:IsReplicationPauseRequest": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ListBucketsForS3PauseReplication",
+      "Effect": "Allow",
+      "Action": "s3:ListAllMyBuckets",
+      "Resource": "*"
+    }
+  ]
+}

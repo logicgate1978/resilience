@@ -1138,6 +1138,64 @@ During execution, the framework now prints lightweight progress logs:
 - FIS runs log generic `FIS is running` progress messages while the experiment is active
 - ARC runs log generic `ARC is running` progress messages while the region action is active
 
+## IAM Policy Template
+
+The repository now includes a shared FIS experiment-role policy template at [iam/fis-experiment-role-policy.json](c:/OneDrive/Documents/Codes/resilience/iam/fis-experiment-role-policy.json).
+
+Before using it, replace the placeholders:
+
+- `123456789012` with your AWS account ID
+- the example IAM role ARNs under `ec2:FisTargetArns` with the real roles you allow for `ec2:pause-launch`
+- the wildcard Auto Scaling scope with a narrower ARN pattern if you know the target ASG names
+- `your-source-bucket-1` and `your-source-bucket-2` with the real S3 source buckets used by `s3:pause-replication`
+- the example destination Regions under `s3:DestinationRegion` with the real replication target Regions for your buckets
+
+Optional tightening:
+
+- add `kms:CreateGrant` only if you use `ec2:stop` with restart-after-duration on encrypted EBS volumes
+- add `vpce:AllowMultiRegion` only if you use `network:disrupt-vpc-endpoint` against cross-Region VPC endpoints
+- split this shared policy into smaller action-family policies if you want stricter least privilege than one shared FIS role
+
+The repository also includes an ARC Region switch execution-role policy template at [iam/arc-region-switch-execution-role-policy.json](c:/OneDrive/Documents/Codes/resilience/iam/arc-region-switch-execution-role-policy.json).
+
+That template is scoped to the ARC features currently implemented in this repo:
+
+- Aurora Global Database failover
+- Aurora Global Database switchover
+
+Before using it, replace the placeholders:
+
+- `123456789012` with your AWS account ID
+- `your-global-cluster-id` with the Aurora Global Database identifier
+- `your-primary-cluster-id` and `your-secondary-cluster-id` with the member cluster identifiers in each Region
+- `ap-southeast-1` and `ap-southeast-2` with your real primary and secondary Regions if different
+
+If your Aurora Global Database has more than two member Regions, add the additional cluster ARNs to the same statement.
+
+For the EC2 instance profile that runs `python main.py`, the repository now also includes:
+
+- [iam/ec2-runner-role-policy.json](c:/OneDrive/Documents/Codes/resilience/iam/ec2-runner-role-policy.json)
+- [iam/ec2-runner-role-trust-policy.json](c:/OneDrive/Documents/Codes/resilience/iam/ec2-runner-role-trust-policy.json)
+
+The runner-role policy covers what the current codebase needs to do from the EC2 host:
+
+- create and start FIS experiments
+- create and start ARC Region switch plans
+- pass the FIS experiment role and ARC execution role
+- run current custom actions for EC2, RDS, Aurora Global Database, ASG, EFS, EKS, Route 53 DNS, and S3 MRAP
+- perform resource discovery, validation, and CloudWatch / load balancer observability lookups
+
+Before using it, replace the placeholders:
+
+- `123456789012` with your AWS account ID
+- `arn:aws:iam::123456789012:role/your-fis-experiment-role` with the real FIS experiment role ARN
+- `arn:aws:iam::123456789012:role/your-arc-region-switch-execution-role` with the real ARC execution role ARN
+
+Optional additions that are intentionally not in the shared runner policy template:
+
+- `ssm:GetParameters` if you use `--upload-artifactory`, because the current upload helper reads an SSM parameter for the Artifactory credential
+- tighter resource scopes for specific EC2 instances, RDS resources, EFS file systems, Route 53 hosted zones, or EKS clusters once your production target set is known
+
 ## Extension Guidance
 
 ### When Adding a New FIS Action

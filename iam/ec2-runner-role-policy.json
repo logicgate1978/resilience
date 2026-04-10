@@ -1,0 +1,193 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "FisExperimentLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "fis:CreateExperimentTemplate",
+        "fis:StartExperiment",
+        "fis:GetExperiment"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ArcRegionSwitchLifecycle",
+      "Effect": "Allow",
+      "Action": [
+        "arc-region-switch:CreatePlan",
+        "arc-region-switch:StartPlanExecution",
+        "arc-region-switch:GetPlanExecution"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PassFisAndArcExecutionRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::123456789012:role/your-fis-experiment-role",
+        "arn:aws:iam::123456789012:role/your-arc-region-switch-execution-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "fis.amazonaws.com",
+            "arc-region-switch.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "IamRoleLookupForEc2PauseLaunch",
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": "arn:aws:iam::123456789012:role/*"
+    },
+    {
+      "Sid": "CallerIdentityAndEksTokenSupport",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Ec2ReadForDiscoveryValidationAndObservability",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:DescribeNetworkAcls",
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeVpcEndpoints",
+        "ec2:DescribeVpcs",
+        "ec2:GetManagedPrefixListEntries"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Ec2CustomActions",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StopInstances",
+        "ec2:StartInstances",
+        "ec2:RebootInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:aws:ec2:*:123456789012:instance/*"
+    },
+    {
+      "Sid": "AutoScalingReadAndCustomScale",
+      "Effect": "Allow",
+      "Action": [
+        "autoscaling:DescribeAutoScalingGroups",
+        "autoscaling:UpdateAutoScalingGroup"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RdsReadForDiscoveryValidationAndStatePolling",
+      "Effect": "Allow",
+      "Action": [
+        "rds:DescribeDBInstances",
+        "rds:DescribeDBClusters",
+        "rds:DescribeGlobalClusters",
+        "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RdsCustomActions",
+      "Effect": "Allow",
+      "Action": [
+        "rds:RebootDBInstance",
+        "rds:FailoverDBCluster",
+        "rds:FailoverGlobalCluster",
+        "rds:SwitchoverGlobalCluster"
+      ],
+      "Resource": [
+        "arn:aws:rds:*:123456789012:db:*",
+        "arn:aws:rds:*:123456789012:cluster:*",
+        "arn:aws:rds::123456789012:global-cluster:*"
+      ]
+    },
+    {
+      "Sid": "EksReadForFisAndCustomActions",
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "eks:DescribeNodegroup"
+      ],
+      "Resource": [
+        "arn:aws:eks:*:123456789012:cluster/*",
+        "arn:aws:eks:*:123456789012:nodegroup/*/*/*"
+      ]
+    },
+    {
+      "Sid": "EfsReadForDiscoveryAndValidation",
+      "Effect": "Allow",
+      "Action": [
+        "efs:DescribeFileSystems",
+        "efs:DescribeReplicationConfigurations",
+        "efs:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EfsCustomFailover",
+      "Effect": "Allow",
+      "Action": "efs:DeleteReplicationConfiguration",
+      "Resource": "arn:aws:elasticfilesystem:*:123456789012:file-system/*"
+    },
+    {
+      "Sid": "S3ReadForBucketDiscovery",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation",
+        "s3:GetBucketTagging"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3MrapCustomFailover",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetMultiRegionAccessPoint",
+        "s3:ListMultiRegionAccessPoints",
+        "s3:GetMultiRegionAccessPointRoutes",
+        "s3:SubmitMultiRegionAccessPointRoutes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53DnsCustomActions",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZonesByName",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:GetChange"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LoadBalancerReadForObservability",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DescribeLoadBalancers",
+        "elasticloadbalancing:DescribeTags",
+        "elasticloadbalancing:DescribeInstanceHealth",
+        "elasticloadbalancingv2:DescribeLoadBalancers",
+        "elasticloadbalancingv2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudWatchReadForObservability",
+      "Effect": "Allow",
+      "Action": "cloudwatch:GetMetricData",
+      "Resource": "*"
+    }
+  ]
+}
