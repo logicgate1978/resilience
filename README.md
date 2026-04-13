@@ -1096,6 +1096,25 @@ Current behavior:
   - `project=clouddash`
 - writes stack state to `commands/s3/.state/current_s3_mrap_stack.txt`
 - writes a sample text file to `commands/s3/.state/sample_replication_object.txt`
+
+### S3 Replication Helper
+
+- `commands/s3/create_s3_replication_stack.sh` creates or reuses a minimal one-way S3 replication test stack with:
+  - one versioned source bucket in `ap-southeast-1`
+  - one versioned destination bucket in `ap-southeast-2`
+  - one-way replication from the primary bucket to the secondary bucket
+  - one sample text object uploaded to the primary bucket after replication is configured
+- `commands/s3/destroy_s3_replication_stack.sh` tears down that one-way replication stack using the saved local state by default, removes the replication rule from the source bucket, empties both versioned buckets, deletes them, and removes the IAM role and inline policy used for replication.
+
+Current behavior:
+
+- creates deterministic bucket names based on the base name, account ID, and Region
+- creates one IAM role plus one inline policy for one-way S3 replication
+- tags the buckets with:
+  - `environment=development`
+  - `project=clouddash`
+- writes stack state to `commands/s3/.state/current_s3_replication_stack.txt`
+- writes a sample text file to `commands/s3/.state/sample_pause_replication_object.txt`
 - the destroy helper empties both buckets before deleting them
 
 Example:
