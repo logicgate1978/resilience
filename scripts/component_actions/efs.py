@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+import botocore.exceptions
+
 from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns
 from utility import normalize_service_name, resolve_service_zone
@@ -31,7 +33,13 @@ def _optional_bool(value: Any, default: bool) -> bool:
 
 
 def _describe_replications_for_file_system(efs, file_system_id: str) -> List[Dict[str, Any]]:
-    response = efs.describe_replication_configurations(FileSystemId=file_system_id)
+    try:
+        response = efs.describe_replication_configurations(FileSystemId=file_system_id)
+    except botocore.exceptions.ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code") or "").strip()
+        if code == "ReplicationNotFound":
+            return []
+        raise
     return list(response.get("Replications") or [])
 
 

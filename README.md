@@ -671,6 +671,7 @@ The custom EFS failover action:
 4. either:
    - completes immediately when `service.wait_for_ready = false`
    - or polls until the replication configuration is no longer returned by `DescribeReplicationConfigurations`
+   - a `ReplicationNotFound` response during that wait is treated as success, because it means the replication configuration is already gone
 
 If your tag selection matches multiple file systems, the action operates on all of them. It fails fast when any selected file system does not have replication configured.
 
