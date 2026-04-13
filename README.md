@@ -1115,14 +1115,31 @@ Current behavior:
   - `project=clouddash`
 - writes stack state to `commands/s3/.state/current_s3_replication_stack.txt`
 - writes a sample text file to `commands/s3/.state/sample_pause_replication_object.txt`
-- the destroy helper empties both buckets before deleting them
+
+### EFS Replication Helper
+
+- `commands/efs/create_efs_replication_stack.sh` creates or reuses a minimal one-way EFS replication test stack with:
+  - one EFS file system in `ap-southeast-1`
+  - one EFS file system in `ap-southeast-2`
+  - one-way replication from the primary file system to the secondary file system
+  - the secondary file system reused as an existing destination for replication
+- `commands/efs/destroy_efs_replication_stack.sh` tears down that EFS replication stack using the saved local state by default, deletes the replication configuration first, waits for it to be removed, then deletes both file systems.
+
+Current behavior:
+
+- uses deterministic `Name` tags based on the base name with `-primary` and `-secondary` suffixes
+- tags both file systems with:
+  - `environment=development`
+  - `project=clouddash`
+- creates file systems without mount targets, which is sufficient for testing `efs:failover`
+- writes stack state to `commands/efs/.state/current_efs_replication_stack.txt`
 
 Example:
 
 ```bash
-./commands/rds/create_aurora_global_db.sh
-./commands/rds/create_aurora_global_db.sh --name clouddash-global --engine-version <engine-version>
-./commands/rds/destroy_aurora_global_db.sh
+./commands/efs/create_efs_replication_stack.sh
+./commands/efs/create_efs_replication_stack.sh --name clouddash-efs --primary-region ap-southeast-1 --secondary-region ap-southeast-2
+./commands/efs/destroy_efs_replication_stack.sh
 ```
 
 ### Run a Component or Site Test
