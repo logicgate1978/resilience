@@ -193,38 +193,324 @@ The example columns below show compact service-block snippets so each action sta
   </thead>
   <tbody>
     <tr><th colspan="6" align="left">Common</th></tr>
-    <tr><td><code>common:wait</code></td><td>FIS or custom</td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td><td><code>name: common<br>action: wait<br>duration: PT2M</code></td><td><code>name: common<br>action: wait<br>duration: PT30S<br>use_fis: false<br>start_after: ec2:stop</code></td></tr>
+    <tr><td><code>common:wait</code></td><td>FIS or custom</td><td>Pause execution for a fixed duration between other actions. Uses FIS by default, or Python sleep when <code>service.use_fis: false</code>.</td><td><code>aws:fis:wait</code></td><td><pre><code class="language-yaml">- name: common
+  action: wait
+  duration: PT2M</code></pre></td><td><pre><code class="language-yaml">- name: common
+  action: wait
+  duration: PT30S
+  use_fis: false
+  start_after: ec2:stop</code></pre></td></tr>
     <tr><th colspan="6" align="left">DNS</th></tr>
-    <tr><td><code>dns:set-value</code></td><td>Custom</td><td>Update the value of a simple Route 53 DNS record for component or region workflows.</td><td></td><td><code>name: dns<br>action: set-value<br>target.hosted_zone: logicgate.biz<br>target.record_name: dev.logicgate.biz<br>target.record_type: A<br>value: 1.2.3.4</code></td><td><code>name: dns<br>action: set-value<br>target.hosted_zone: logicgate.biz<br>target.record_name: dev.logicgate.biz<br>target.record_type: A<br>value: 1.2.3.4<br>start_after: dns:set-weight</code></td></tr>
-    <tr><td><code>dns:set-weight</code></td><td>Custom</td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td><td><code>name: dns<br>action: set-weight<br>target.hosted_zone: logicgate.biz<br>target.record_name: weighted.logicgate.biz<br>target.record_type: A<br>value: primary=0,secondary=100</code></td><td><code>name: dns<br>action: set-weight<br>target.hosted_zone: logicgate.biz<br>target.record_name: weighted.logicgate.biz<br>target.record_type: A<br>value: primary=10,secondary=90<br>start_after: dns:set-value</code></td></tr>
+    <tr><td><code>dns:set-value</code></td><td>Custom</td><td>Update the value of a simple Route 53 DNS record for component or region workflows.</td><td></td><td><pre><code class="language-yaml">- name: dns
+  action: set-value
+  target:
+    hosted_zone: logicgate.biz
+    record_name: dev.logicgate.biz
+    record_type: A
+  value: 1.2.3.4</code></pre></td><td><pre><code class="language-yaml">- name: dns
+  action: set-value
+  target:
+    hosted_zone: logicgate.biz
+    record_name: dev.logicgate.biz
+    record_type: A
+  value: 1.2.3.4
+  start_after: dns:set-weight</code></pre></td></tr>
+    <tr><td><code>dns:set-weight</code></td><td>Custom</td><td>Update Route 53 weighted-routing record weights by set identifier for component or region workflows.</td><td></td><td><pre><code class="language-yaml">- name: dns
+  action: set-weight
+  target:
+    hosted_zone: logicgate.biz
+    record_name: weighted.logicgate.biz
+    record_type: A
+  value: primary=0,secondary=100</code></pre></td><td><pre><code class="language-yaml">- name: dns
+  action: set-weight
+  target:
+    hosted_zone: logicgate.biz
+    record_name: weighted.logicgate.biz
+    record_type: A
+  value: primary=10,secondary=90
+  start_after: dns:set-value</code></pre></td></tr>
     <tr><th colspan="6" align="left">EC2</th></tr>
-    <tr><td><code>ec2:pause-launch</code></td><td>FIS</td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td><td><code>name: ec2<br>action: pause-launch<br>duration: PT5M<br>zone: ap-southeast-1a</code></td><td><code>name: ec2<br>action: pause-launch<br>duration: PT5M<br>zone: ap-southeast-1a<br>iam_roles: BAU,Admin<br>start_after: common:wait</code></td></tr>
-    <tr><td><code>ec2:stop</code></td><td>FIS or custom</td><td>Stop selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. If <code>service.duration</code> is provided, the framework maps it to auto-restart behavior; if it is omitted, the instances remain stopped.</td><td><code>aws:ec2:stop-instances</code></td><td><code>name: ec2<br>action: stop<br>region: ap-southeast-1<br>tags: environment=development,project=clouddash</code></td><td><code>name: ec2<br>action: stop<br>region: ap-southeast-1<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash<br>duration: PT5M<br>use_fis: false</code></td></tr>
-    <tr><td><code>ec2:reboot</code></td><td>FIS or custom</td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td><td><code>name: ec2<br>action: reboot<br>region: ap-southeast-1<br>tags: environment=development,project=clouddash</code></td><td><code>name: ec2<br>action: reboot<br>region: ap-southeast-1<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash<br>use_fis: false</code></td></tr>
-    <tr><td><code>ec2:terminate</code></td><td>FIS or custom</td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td><td><code>name: ec2<br>action: terminate<br>region: ap-southeast-1<br>tags: environment=development,project=clouddash</code></td><td><code>name: ec2<br>action: terminate<br>region: ap-southeast-1<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash<br>use_fis: false</code></td></tr>
+    <tr><td><code>ec2:pause-launch</code></td><td>FIS</td><td>Simulate insufficient EC2 capacity for instance launches in a site/AZ-scoped test.</td><td><code>aws:ec2:api-insufficient-instance-capacity-error</code></td><td><pre><code class="language-yaml">- name: ec2
+  action: pause-launch
+  duration: PT5M
+  zone: ap-southeast-1a</code></pre></td><td><pre><code class="language-yaml">- name: ec2
+  action: pause-launch
+  duration: PT5M
+  zone: ap-southeast-1a
+  iam_roles: BAU,Admin
+  start_after: common:wait</code></pre></td></tr>
+    <tr><td><code>ec2:stop</code></td><td>FIS or custom</td><td>Stop selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. If <code>service.duration</code> is provided, the framework maps it to auto-restart behavior; if it is omitted, the instances remain stopped.</td><td><code>aws:ec2:stop-instances</code></td><td><pre><code class="language-yaml">- name: ec2
+  action: stop
+  region: ap-southeast-1
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: ec2
+  action: stop
+  region: ap-southeast-1
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash
+  duration: PT5M
+  use_fis: false</code></pre></td></tr>
+    <tr><td><code>ec2:reboot</code></td><td>FIS or custom</td><td>Reboot selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. <code>service.duration</code> is optional and ignored in both paths.</td><td><code>aws:ec2:reboot-instances</code></td><td><pre><code class="language-yaml">- name: ec2
+  action: reboot
+  region: ap-southeast-1
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: ec2
+  action: reboot
+  region: ap-southeast-1
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash
+  use_fis: false</code></pre></td></tr>
+    <tr><td><code>ec2:terminate</code></td><td>FIS or custom</td><td>Terminate selected EC2 instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>. Terminated instances are not restarted.</td><td><code>aws:ec2:terminate-instances</code></td><td><pre><code class="language-yaml">- name: ec2
+  action: terminate
+  region: ap-southeast-1
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: ec2
+  action: terminate
+  region: ap-southeast-1
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash
+  use_fis: false</code></pre></td></tr>
     <tr><th colspan="6" align="left">RDS</th></tr>
-    <tr><td><code>rds:reboot</code></td><td>FIS or custom</td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td><td><code>name: rds<br>action: reboot<br>region: ap-southeast-1<br>identifier: database-1</code></td><td><code>name: rds<br>action: reboot<br>region: ap-southeast-1<br>identifier: database-1<br>tags: environment=development,project=clouddash<br>use_fis: false</code></td></tr>
-    <tr><td><code>rds:failover</code></td><td>FIS or custom</td><td>Fail over a selected RDS or Aurora DB cluster to a replica. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:failover-db-cluster</code></td><td><code>name: rds<br>action: failover<br>region: ap-southeast-1<br>identifier: database-cluster-1</code></td><td><code>name: rds<br>action: failover<br>region: ap-southeast-1<br>identifier: database-cluster-1<br>tags: environment=development,project=clouddash<br>use_fis: false</code></td></tr>
-    <tr><td><code>rds:failover-global-db</code></td><td>ARC or custom</td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td><td><code>name: rds<br>action: failover-global-db<br>identifier: resilience-aurora-global<br>target_region: ap-southeast-2<br>use_arc: false</code></td><td><code>name: rds<br>action: failover-global-db<br>identifier: resilience-aurora-global<br>primary_region: ap-southeast-1<br>secondary_region: ap-southeast-2<br>from: ap-southeast-1<br>use_arc: true</code></td></tr>
-    <tr><td><code>rds:switchover-global-db</code></td><td>ARC or custom</td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td><td><code>name: rds<br>action: switchover-global-db<br>identifier: resilience-aurora-global<br>target_region: ap-southeast-1<br>use_arc: false</code></td><td><code>name: rds<br>action: switchover-global-db<br>identifier: resilience-aurora-global<br>primary_region: ap-southeast-1<br>secondary_region: ap-southeast-2<br>from: ap-southeast-2<br>use_arc: true</code></td></tr>
+    <tr><td><code>rds:reboot</code></td><td>FIS or custom</td><td>Reboot selected RDS DB instances. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:reboot-db-instances</code></td><td><pre><code class="language-yaml">- name: rds
+  action: reboot
+  region: ap-southeast-1
+  identifier: database-1</code></pre></td><td><pre><code class="language-yaml">- name: rds
+  action: reboot
+  region: ap-southeast-1
+  identifier: database-1
+  tags: environment=development,project=clouddash
+  use_fis: false</code></pre></td></tr>
+    <tr><td><code>rds:failover</code></td><td>FIS or custom</td><td>Fail over a selected RDS or Aurora DB cluster to a replica. Uses FIS by default, or boto3 when <code>service.use_fis: false</code>.</td><td><code>aws:rds:failover-db-cluster</code></td><td><pre><code class="language-yaml">- name: rds
+  action: failover
+  region: ap-southeast-1
+  identifier: database-cluster-1</code></pre></td><td><pre><code class="language-yaml">- name: rds
+  action: failover
+  region: ap-southeast-1
+  identifier: database-cluster-1
+  tags: environment=development,project=clouddash
+  use_fis: false</code></pre></td></tr>
+    <tr><td><code>rds:failover-global-db</code></td><td>ARC or custom</td><td>Fail over an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td><td><pre><code class="language-yaml">- name: rds
+  action: failover-global-db
+  identifier: resilience-aurora-global
+  target_region: ap-southeast-2
+  use_arc: false</code></pre></td><td><pre><code class="language-yaml">- name: rds
+  action: failover-global-db
+  identifier: resilience-aurora-global
+  primary_region: ap-southeast-1
+  secondary_region: ap-southeast-2
+  from: ap-southeast-1
+  use_arc: true</code></pre></td></tr>
+    <tr><td><code>rds:switchover-global-db</code></td><td>ARC or custom</td><td>Switchover an Aurora Global Database across Regions. Uses ARC when <code>use_arc: true</code>; otherwise uses a custom boto3 RDS implementation.</td><td><code>AuroraGlobalDatabase</code></td><td><pre><code class="language-yaml">- name: rds
+  action: switchover-global-db
+  identifier: resilience-aurora-global
+  target_region: ap-southeast-1
+  use_arc: false</code></pre></td><td><pre><code class="language-yaml">- name: rds
+  action: switchover-global-db
+  identifier: resilience-aurora-global
+  primary_region: ap-southeast-1
+  secondary_region: ap-southeast-2
+  from: ap-southeast-2
+  use_arc: true</code></pre></td></tr>
     <tr><th colspan="6" align="left">ASG</th></tr>
-    <tr><td><code>asg:pause-launch</code></td><td>FIS</td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td><td><code>name: asg<br>action: pause-launch<br>duration: PT5M<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash</code></td><td><code>name: asg<br>action: pause-launch<br>duration: PT5M<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash<br>start_after: common:wait</code></td></tr>
-    <tr><td><code>asg:scale</code></td><td>Custom</td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td><td><code>name: asg<br>action: scale<br>region: ap-southeast-1<br>tags: environment=development,project=clouddash<br>parameters.max: 2</code></td><td><code>name: asg<br>action: scale<br>region: ap-southeast-1<br>tags: environment=development,project=clouddash<br>parameters.min: 0<br>parameters.max: 2<br>parameters.desired: 2<br>parameters.wait_for_ready: true</code></td></tr>
+    <tr><td><code>asg:pause-launch</code></td><td>FIS</td><td>Simulate insufficient capacity for Auto Scaling launches in a site/AZ-scoped test.</td><td><code>aws:ec2:asg-insufficient-instance-capacity-error</code></td><td><pre><code class="language-yaml">- name: asg
+  action: pause-launch
+  duration: PT5M
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: asg
+  action: pause-launch
+  duration: PT5M
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash
+  start_after: common:wait</code></pre></td></tr>
+    <tr><td><code>asg:scale</code></td><td>Custom</td><td>Scale Auto Scaling Groups by updating min, max, and desired capacity through the Auto Scaling API.</td><td></td><td><pre><code class="language-yaml">- name: asg
+  action: scale
+  region: ap-southeast-1
+  tags: environment=development,project=clouddash
+  parameters:
+    max: 2</code></pre></td><td><pre><code class="language-yaml">- name: asg
+  action: scale
+  region: ap-southeast-1
+  tags: environment=development,project=clouddash
+  parameters:
+    min: 0
+    max: 2
+    desired: 2
+    wait_for_ready: true</code></pre></td></tr>
     <tr><th colspan="6" align="left">Network</th></tr>
-    <tr><td><code>network:disrupt-connectivity</code></td><td>FIS</td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td><td><code>name: network<br>action: disrupt-connectivity<br>region: ap-southeast-1<br>duration: PT5M<br>tags: environment=development,project=clouddash</code></td><td><code>name: network<br>action: disrupt-connectivity<br>region: ap-southeast-1<br>duration: PT5M<br>zone: ap-southeast-1a<br>tags: environment=development,project=clouddash</code></td></tr>
-    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td>FIS</td><td>Disrupt traffic through selected VPC endpoints.</td><td><code>aws:network:disrupt-vpc-endpoint</code></td><td><code>name: network<br>action: disrupt-vpc-endpoint<br>region: ap-southeast-1<br>duration: PT5M<br>tags: environment=development,project=clouddash</code></td><td><code>name: network<br>action: disrupt-vpc-endpoint<br>region: ap-southeast-1<br>duration: PT5M<br>target.vpc_endpoint_type: Interface<br>target.service_name: com.amazonaws.ap-southeast-1.s3<br>tags: environment=development,project=clouddash</code></td></tr>
+    <tr><td><code>network:disrupt-connectivity</code></td><td>FIS</td><td>Disrupt connectivity for selected subnets.</td><td><code>aws:network:disrupt-connectivity</code></td><td><pre><code class="language-yaml">- name: network
+  action: disrupt-connectivity
+  region: ap-southeast-1
+  duration: PT5M
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: network
+  action: disrupt-connectivity
+  region: ap-southeast-1
+  duration: PT5M
+  zone: ap-southeast-1a
+  tags: environment=development,project=clouddash</code></pre></td></tr>
+    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td>FIS</td><td>Disrupt traffic through selected VPC endpoints.</td><td><code>aws:network:disrupt-vpc-endpoint</code></td><td><pre><code class="language-yaml">- name: network
+  action: disrupt-vpc-endpoint
+  region: ap-southeast-1
+  duration: PT5M
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: network
+  action: disrupt-vpc-endpoint
+  region: ap-southeast-1
+  duration: PT5M
+  tags: environment=development,project=clouddash
+  target:
+    vpc_endpoint_type: Interface
+    service_name: com.amazonaws.ap-southeast-1.s3</code></pre></td></tr>
     <tr><th colspan="6" align="left">S3</th></tr>
-    <tr><td><code>s3:pause-replication</code></td><td>FIS</td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td><td><code>name: s3<br>action: pause-replication<br>region: ap-southeast-1<br>duration: PT5M<br>destination_region: ap-southeast-2<br>tags: environment=development,project=clouddash</code></td><td><code>name: s3<br>action: pause-replication<br>region: ap-southeast-1<br>duration: PT5M<br>destination_region: ap-southeast-2<br>destination_buckets: my-dr-bucket<br>prefixes: critical/<br>tags: environment=development,project=clouddash</code></td></tr>
-    <tr><td><code>s3:failover</code></td><td>Custom</td><td>Fail over an S3 Multi-Region Access Point by making one target Region active and all other configured MRAP regions passive.</td><td></td><td><code>name: s3<br>action: failover<br>target.mrap_name: my-mrap<br>target.target_region: ap-southeast-2</code></td><td><code>name: s3<br>action: failover<br>region: eu-west-1<br>target.mrap_name: my-mrap<br>target.target_region: ap-southeast-2<br>wait_for_ready: true<br>timeout_seconds: 300</code></td></tr>
+    <tr><td><code>s3:pause-replication</code></td><td>FIS</td><td>Pause replication from source S3 buckets to destination buckets.</td><td><code>aws:s3:bucket-pause-replication</code></td><td><pre><code class="language-yaml">- name: s3
+  action: pause-replication
+  region: ap-southeast-1
+  duration: PT5M
+  destination_region: ap-southeast-2
+  tags: environment=development,project=clouddash</code></pre></td><td><pre><code class="language-yaml">- name: s3
+  action: pause-replication
+  region: ap-southeast-1
+  duration: PT5M
+  destination_region: ap-southeast-2
+  destination_buckets:
+    - my-dr-bucket
+  prefixes:
+    - critical/
+  tags: environment=development,project=clouddash</code></pre></td></tr>
+    <tr><td><code>s3:failover</code></td><td>Custom</td><td>Fail over an S3 Multi-Region Access Point by making one target Region active and all other configured MRAP regions passive.</td><td></td><td><pre><code class="language-yaml">- name: s3
+  action: failover
+  target:
+    mrap_name: my-mrap
+    target_region: ap-southeast-2</code></pre></td><td><pre><code class="language-yaml">- name: s3
+  action: failover
+  region: eu-west-1
+  target:
+    mrap_name: my-mrap
+    target_region: ap-southeast-2
+  wait_for_ready: true
+  timeout_seconds: 300</code></pre></td></tr>
     <tr><th colspan="6" align="left">EFS</th></tr>
-    <tr><td><code>efs:failover</code></td><td>Custom</td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable.</td><td></td><td><code>name: efs<br>action: failover<br>region: ap-southeast-1<br>tags: Name=test-efs</code></td><td><code>name: efs<br>action: failover<br>region: ap-southeast-1<br>tags: Name=test-efs<br>wait_for_ready: true<br>start_after: common:wait</code></td></tr>
+    <tr><td><code>efs:failover</code></td><td>Custom</td><td>Delete the EFS replication configuration for the selected file system so the destination becomes writable.</td><td></td><td><pre><code class="language-yaml">- name: efs
+  action: failover
+  region: ap-southeast-1
+  tags: Name=test-efs</code></pre></td><td><pre><code class="language-yaml">- name: efs
+  action: failover
+  region: ap-southeast-1
+  tags: Name=test-efs
+  wait_for_ready: true
+  start_after: common:wait</code></pre></td></tr>
     <tr><th colspan="6" align="left">EKS</th></tr>
-    <tr><td><code>eks:delete-pod</code></td><td>FIS</td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td><td><code>name: eks<br>action: delete-pod<br>region: ap-southeast-1<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount</code></td><td><code>name: eks<br>action: delete-pod<br>region: ap-southeast-1<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount<br>parameters.grace_period_seconds: 30</code></td></tr>
-    <tr><td><code>eks:pod-cpu-stress</code></td><td>FIS</td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td><td><code>name: eks<br>action: pod-cpu-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount</code></td><td><code>name: eks<br>action: pod-cpu-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount<br>parameters.workers: 2<br>parameters.percent: 80</code></td></tr>
-    <tr><td><code>eks:pod-io-stress</code></td><td>FIS</td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td><td><code>name: eks<br>action: pod-io-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount</code></td><td><code>name: eks<br>action: pod-io-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount<br>parameters.workers: 2</code></td></tr>
-    <tr><td><code>eks:pod-memory-stress</code></td><td>FIS</td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td><td><code>name: eks<br>action: pod-memory-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount</code></td><td><code>name: eks<br>action: pod-memory-stress<br>region: ap-southeast-1<br>duration: PT2M<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.selector_type: labelSelector<br>target.selector_value: app=myapp<br>kubernetes_service_account: myserviceaccount<br>parameters.percent: 80</code></td></tr>
-    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>FIS</td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td><td><code>name: eks<br>action: terminate-nodegroup-instances<br>region: ap-southeast-1<br>target.nodegroup_arn: arn:aws:eks:...<br>parameters.instance_termination_percentage: 50</code></td><td><code>name: eks<br>action: terminate-nodegroup-instances<br>region: ap-southeast-1<br>target.nodegroup_arn: arn:aws:eks:...<br>parameters.instance_termination_percentage: 50<br>start_after: eks:delete-pod</code></td></tr>
-    <tr><td><code>eks:scale-deployment</code></td><td>Custom</td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API for component or region workflows.</td><td></td><td><code>name: eks<br>action: scale-deployment<br>region: ap-southeast-1<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.deployment_name: my-service<br>parameters.replicas: 0</code></td><td><code>name: eks<br>action: scale-deployment<br>region: ap-southeast-1<br>target.cluster_identifier: my-eks-cluster<br>target.namespace: default<br>target.deployment_name: my-service<br>parameters.replicas: 3<br>parameters.wait_for_ready: true<br>parameters.timeout_seconds: 600</code></td></tr>
+    <tr><td><code>eks:delete-pod</code></td><td>FIS</td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td><td><pre><code class="language-yaml">- name: eks
+  action: delete-pod
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: delete-pod
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount
+  parameters:
+    grace_period_seconds: 30</code></pre></td></tr>
+    <tr><td><code>eks:pod-cpu-stress</code></td><td>FIS</td><td>Run CPU stress against selected EKS pods.</td><td><code>aws:eks:pod-cpu-stress</code></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-cpu-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-cpu-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount
+  parameters:
+    workers: 2
+    percent: 80</code></pre></td></tr>
+    <tr><td><code>eks:pod-io-stress</code></td><td>FIS</td><td>Run I/O stress against selected EKS pods.</td><td><code>aws:eks:pod-io-stress</code></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-io-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-io-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount
+  parameters:
+    workers: 2</code></pre></td></tr>
+    <tr><td><code>eks:pod-memory-stress</code></td><td>FIS</td><td>Run memory stress against selected EKS pods.</td><td><code>aws:eks:pod-memory-stress</code></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-memory-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: pod-memory-stress
+  region: ap-southeast-1
+  duration: PT2M
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    selector_type: labelSelector
+    selector_value: app=myapp
+  kubernetes_service_account: myserviceaccount
+  parameters:
+    percent: 80</code></pre></td></tr>
+    <tr><td><code>eks:terminate-nodegroup-instances</code></td><td>FIS</td><td>Terminate a percentage of instances in an Amazon EKS managed node group.</td><td><code>aws:eks:terminate-nodegroup-instances</code></td><td><pre><code class="language-yaml">- name: eks
+  action: terminate-nodegroup-instances
+  region: ap-southeast-1
+  target:
+    nodegroup_arn: arn:aws:eks:...
+  parameters:
+    instance_termination_percentage: 50</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: terminate-nodegroup-instances
+  region: ap-southeast-1
+  target:
+    nodegroup_arn: arn:aws:eks:...
+  parameters:
+    instance_termination_percentage: 50
+  start_after: eks:delete-pod</code></pre></td></tr>
+    <tr><td><code>eks:scale-deployment</code></td><td>Custom</td><td>Scale a Kubernetes Deployment in an EKS cluster through the Kubernetes API for component or region workflows.</td><td></td><td><pre><code class="language-yaml">- name: eks
+  action: scale-deployment
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    deployment_name: my-service
+  parameters:
+    replicas: 0</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: scale-deployment
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    namespace: default
+    deployment_name: my-service
+  parameters:
+    replicas: 3
+    wait_for_ready: true
+    timeout_seconds: 600</code></pre></td></tr>
   </tbody>
 </table>
 
