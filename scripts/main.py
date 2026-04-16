@@ -188,6 +188,7 @@ def main() -> int:
     ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", "arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole"), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
     ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
+    ap.add_argument("--skip-validation", action="store_true", help="Skip pre-execution action validation and continue directly to planning/execution")
     ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
     ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 3600), help="Timeout per experiment in seconds")
     ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
@@ -199,7 +200,10 @@ def main() -> int:
     ensure_dir(args.outdir)
 
     if engine_family == "arc":
-        validate_region_manifest(manifest)
+        if args.skip_validation:
+            print("[WARN] --skip-validation enabled: skipping ARC pre-execution validation.")
+        else:
+            validate_region_manifest(manifest)
         control_region = _default_session_region(manifest, engine_family)
         session = boto3.Session(region_name=control_region)
 
@@ -314,18 +318,21 @@ def main() -> int:
         raise ValueError("FIS actions require region at the top level or service level.")
 
     session = boto3.Session(region_name=region)
-    try:
-        validate_manifest_services(
-            manifest,
-            session=session,
-            region=region,
-        )
-    except ValidationError as e:
-        print(f"[ERROR] {e}")
-        return 1
-    except ValueError as e:
-        print(f"[ERROR] {e}")
-        return 1
+    if args.skip_validation:
+        print("[WARN] --skip-validation enabled: skipping pre-execution action validation.")
+    else:
+        try:
+            validate_manifest_services(
+                manifest,
+                session=session,
+                region=region,
+            )
+        except ValidationError as e:
+            print(f"[ERROR] {e}")
+            return 1
+        except ValueError as e:
+            print(f"[ERROR] {e}")
+            return 1
 
     if engine_family == "custom":
         execution_plan = build_custom_execution_plan(

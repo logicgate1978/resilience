@@ -627,6 +627,8 @@ Important sequencing note:
 
 Only actions listed in `scripts/validations/actions.yml` currently run pre-execution validations. If a validation fails, the framework stops before starting the action and returns a descriptive error.
 
+You can bypass these pre-execution checks with the CLI flag `--skip-validation`. That flag skips the validation layer only; manifest loading, engine-family resolution, and the downstream AWS or Kubernetes calls still run and can still fail later.
+
 | Service | Action | Validation | What It Checks |
 | --- | --- | --- | --- |
 | `asg` | `asg:scale` | `verify_resource_existence` | At least one Auto Scaling Group matches the selector. |
@@ -1439,6 +1441,12 @@ From `scripts/`:
 
 ```powershell
 python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
+```
+
+To bypass pre-execution validations for a one-off run:
+
+```powershell
+python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn> --skip-validation
 ```
 
 ### Run a Region Test
