@@ -394,6 +394,21 @@ The example columns below show compact service-block snippets so each action sta
   tags: Name=test-efs
   wait_for_ready: true
   start_after: common:wait</code></pre></td></tr>
+    <tr><td><code>efs:failback</code></td><td>Custom</td><td>Create reverse EFS replication from the selected source file system back to a specific destination file system in another Region.</td><td></td><td><pre><code class="language-yaml">- name: efs
+  action: failback
+  region: ap-southeast-2
+  identifier: fs-0123456789abcdef0
+  target:
+    destination_region: ap-southeast-1
+    destination_file_system_id: fs-0fedcba9876543210</code></pre></td><td><pre><code class="language-yaml">- name: efs
+  action: failback
+  region: ap-southeast-2
+  tags: Name=test-efs-secondary
+  target:
+    destination_region: ap-southeast-1
+    destination_tags: Name=test-efs-primary
+  wait_for_ready: true
+  timeout_seconds: 600</code></pre></td></tr>
     <tr><th colspan="6" align="left">EKS</th></tr>
     <tr><td><code>eks:delete-pod</code></td><td>FIS</td><td>Delete selected EKS pods by namespace and selector.</td><td><code>aws:eks:pod-delete</code></td><td><pre><code class="language-yaml">- name: eks
   action: delete-pod
@@ -591,7 +606,8 @@ This section is split into:
     <tr><td><code>s3:pause-replication</code></td><td><code>service.tags</code>, <code>service.duration</code>, <code>service.destination_region</code></td><td><code>service.destination_buckets</code>, <code>service.prefixes</code>, <code>service.start_after</code></td><td>Narrows paused replication rules by destination bucket and prefix when supplied.</td></tr>
     <tr><td><code>s3:failover</code></td><td>Exactly one of <code>service.target.mrap_name</code>, <code>service.target.mrap_alias</code>, or <code>service.target.mrap_arn</code>, plus <code>service.target.target_region</code></td><td><code>service.region</code>, <code>service.wait_for_ready</code>, <code>service.timeout_seconds</code>, <code>service.start_after</code></td><td><code>service.region</code> defaults to <code>eu-west-1</code>.</td></tr>
     <tr><th colspan="4" align="left">EFS</th></tr>
-    <tr><td><code>efs:failover</code></td><td><code>service.tags</code></td><td><code>service.wait_for_ready</code>, <code>service.start_after</code></td><td>Deletes the replication configuration for the selected file system.</td></tr>
+    <tr><td><code>efs:failover</code></td><td>At least one source selector using <code>service.tags</code> or <code>service.identifier</code></td><td><code>service.wait_for_ready</code>, <code>service.start_after</code></td><td>Deletes the replication configuration for the selected file system.</td></tr>
+    <tr><td><code>efs:failback</code></td><td>At least one source selector using <code>service.tags</code> or <code>service.identifier</code>, plus <code>service.target.destination_region</code> and at least one destination selector using <code>service.target.destination_file_system_id</code> or <code>service.target.destination_tags</code></td><td><code>service.wait_for_ready</code>, <code>service.timeout_seconds</code>, <code>service.start_after</code></td><td>Creates reverse replication back to the destination file system and automatically disables destination replication overwrite protection first when needed.</td></tr>
     <tr><th colspan="4" align="left">EKS</th></tr>
     <tr><td><code>eks:delete-pod</code></td><td>Target fields for cluster, namespace, selector, and a Kubernetes service account value</td><td><code>service.target.count</code>, <code>service.target.selection_mode</code>, <code>service.parameters.grace_period_seconds</code>, <code>service.parameters.max_errors_percent</code>, <code>service.start_after</code></td><td>Pod-targeted EKS FIS actions share the same target shape.</td></tr>
     <tr><td><code>eks:pod-cpu-stress</code></td><td><code>service.duration</code>, the same target fields as <code>eks:delete-pod</code>, and a Kubernetes service account value</td><td><code>service.parameters.workers</code>, <code>service.parameters.percent</code>, <code>service.parameters.max_errors_percent</code>, FIS pod overrides, <code>service.start_after</code></td><td>Uses the native FIS pod CPU stress action.</td></tr>
@@ -644,6 +660,9 @@ You can bypass these pre-execution checks with the CLI flag `--skip-validation`.
 | `ec2` | `ec2:terminate` | `verify_resource_existence` | At least one EC2 instance matches the selector. |
 | `efs` | `efs:failover` | `verify_resource_existence` | At least one EFS file system matches the selector. |
 | `efs` | `efs:failover` | `verify_replication_configuration_exists` | Each selected EFS file system has an existing replication configuration that can be deleted. |
+| `efs` | `efs:failback` | `verify_resource_existence` | Exactly one source EFS file system must match the selector. |
+| `efs` | `efs:failback` | `verify_failback_target` | `service.target.destination_region` must be present and different from the source Region, and the destination selector must resolve to exactly one different EFS file system. |
+| `efs` | `efs:failback` | `verify_failback_state` | The source and destination file systems must not already be part of another replication configuration, and the destination must not already be in `REPLICATING` overwrite-protection state. |
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. |
@@ -957,7 +976,7 @@ Current behavior:
 
 The custom EFS failover action:
 
-1. resolves EFS file systems from `service.tags`
+1. resolves EFS file systems from `service.tags` and/or `service.identifier`
 2. verifies that each selected file system has a replication configuration
 3. deletes the replication configuration by calling `DeleteReplicationConfiguration` on the source file system
 4. either:
@@ -966,6 +985,24 @@ The custom EFS failover action:
    - a `ReplicationNotFound` response during that wait is treated as success, because it means the replication configuration is already gone
 
 If your tag selection matches multiple file systems, the action operates on all of them. It fails fast when any selected file system does not have replication configured.
+
+### Current `efs:failback` Behavior
+
+The custom EFS failback action:
+
+1. resolves exactly one source EFS file system from `service.tags` and/or `service.identifier`
+2. resolves exactly one destination EFS file system from:
+   - `service.target.destination_file_system_id`
+   - and/or `service.target.destination_tags`
+   - in `service.target.destination_region`
+3. verifies that neither the source nor the destination is already part of another replication configuration
+4. inspects the destination file system's replication overwrite protection and, when needed, updates it to `DISABLED`
+5. creates reverse replication by calling `CreateReplicationConfiguration`
+6. either:
+   - completes immediately when `service.wait_for_ready = false`
+   - or polls until the new replication configuration is returned from `DescribeReplicationConfigurations` with status `ENABLED`
+
+This action is intentionally strict: it requires exactly one source and one destination file system so failback does not happen against the wrong target.
 
 ### Current `s3:failover` Behavior
 
@@ -1424,7 +1461,7 @@ Current behavior:
 - tags both file systems with:
   - `environment=development`
   - `project=clouddash`
-- creates file systems without mount targets, which is sufficient for testing `efs:failover`
+- creates file systems without mount targets, which is sufficient for testing `efs:failover` and `efs:failback`
 - writes stack state to `commands/efs/.state/current_efs_replication_stack.txt`
 
 Example:

@@ -17,6 +17,11 @@ actions:
     validations:
       - verify_resource_existence
       - verify_replication_configuration_exists
+  - action: efs:failback
+    validations:
+      - verify_resource_existence
+      - verify_failback_target
+      - verify_failback_state
   - action: ec2:terminate
     validations:
       - verify_resource_existence

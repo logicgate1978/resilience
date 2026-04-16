@@ -317,7 +317,13 @@ def _collect_vpc_endpoints(
     return arns
 
 
-def _collect_efs_file_systems(session, region: str, tags: Dict[str, str]) -> List[str]:
+def _collect_efs_file_systems(
+    session,
+    region: str,
+    tags: Dict[str, str],
+    *,
+    identifier: Optional[str] = None,
+) -> List[str]:
     efs = session.client("efs", region_name=region)
     arns: List[str] = []
 
@@ -330,6 +336,8 @@ def _collect_efs_file_systems(session, region: str, tags: Dict[str, str]) -> Lis
         for fs in resp.get("FileSystems", []):
             file_system_id = fs.get("FileSystemId")
             if not file_system_id:
+                continue
+            if identifier and str(file_system_id) != identifier:
                 continue
 
             actual_tags: Dict[str, str] = {}
@@ -404,8 +412,8 @@ def collect_service_resource_arns(
     if name == "s3" and action in ("pause-replication", "pause-relication"):
         return _collect_s3_buckets(session, region, tags)
 
-    if name == "efs" and action == "failover":
-        return _collect_efs_file_systems(session, region, tags)
+    if name == "efs" and action in ("failover", "failback"):
+        return _collect_efs_file_systems(session, region, tags, identifier=identifier or None)
 
     return []
 
