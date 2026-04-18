@@ -1,5 +1,6 @@
 boto3
 kubernetes
 matplotlib
+psycopg[binary]
 pyyaml
 requests

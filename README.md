@@ -88,6 +88,22 @@ Responsibilities:
 - starts observability
 - executes and polls the selected control plane
 - triggers HTML report generation
+- optionally persists run metadata, actions, artifacts, validations, and metrics into PostgreSQL when `--db-dsn` is configured
+
+### Database Persistence
+
+- `scripts/persistence/__init__.py`
+- `scripts/persistence/postgres.py`
+- `db/001_init_resilience_schema.sql`
+- `db/README.md`
+
+Responsibilities:
+
+- create a `test_run` row when a run starts
+- persist action plans and final action outcomes
+- persist impacted resources and generated artifacts
+- persist validation outcomes and observability metric samples
+- keep database persistence best-effort so a DB outage does not block the resilience test run
 
 ### Custom Component Actions
 
@@ -1478,6 +1494,12 @@ From `scripts/`:
 
 ```powershell
 python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
+```
+
+To persist the run into PostgreSQL at the same time:
+
+```powershell
+python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn> --db-dsn "host=<host> dbname=<db> user=<user> password=<password> sslmode=require"
 ```
 
 To bypass pre-execution validations for a one-off run:

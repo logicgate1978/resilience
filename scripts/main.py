@@ -15,6 +15,7 @@ from component_actions import (
 )
 from fis_template_generator import create_template, generate_template_payload
 from observability import parse_observability, start_observability_collectors
+from persistence import PostgresRunStore
 from region_switch import (
     build_execution_plan,
     execute_region_plan,
@@ -179,6 +180,36 @@ def _get_report_filename(base_name: str) -> str:
     return f"report_{base_name}_{report_date}.html"
 
 
+def _db_safe_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        print(f"[WARN] Database persistence error: {e}")
+        return None
+
+
+def _artifact_entry(
+    artifact_type: str,
+    *,
+    local_path: Optional[str] = None,
+    content_json: Optional[Dict[str, Any]] = None,
+    object_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "artifact_type": artifact_type,
+        "local_path": local_path,
+        "content_json": content_json,
+        "object_url": object_url,
+    }
+
+
+def _db_run_status(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"completed", "failed", "stopped", "skipped", "running"}:
+        return text
+    return "failed" if text else "completed"
+
+
 def main() -> int:
     env_defaults = load_env_file(ENV_PATH)
 
@@ -187,6 +218,7 @@ def main() -> int:
     ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", 'arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063'), help="FIS IAM role ARN (required unless --dry-run)")
     ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", "arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole"), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
     ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
+    ap.add_argument("--db-dsn", default=_env_value(env_defaults, "DB_DSN", _env_value(env_defaults, "DATABASE_URL", "")), help="Optional PostgreSQL DSN for persisting run metadata and artifacts")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--skip-validation", action="store_true", help="Skip pre-execution action validation and continue directly to planning/execution")
     ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
@@ -196,14 +228,60 @@ def main() -> int:
 
     manifest = load_manifest(args.manifest)
     engine_family = _resolve_manifest_engine_family(manifest)
+    artifact_entries: List[Dict[str, Any]] = [
+        _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest)
+    ]
+    db_store = _db_safe_call(PostgresRunStore.from_dsn, args.db_dsn)
+    run_id = None
+    if db_store is not None:
+        run_id = _db_safe_call(
+            db_store.create_run,
+            manifest=manifest,
+            manifest_path=os.path.abspath(args.manifest),
+            engine_family=engine_family,
+            dry_run=args.dry_run,
+            skip_validation=args.skip_validation,
+            repo_root=REPO_ROOT,
+        )
 
     ensure_dir(args.outdir)
 
     if engine_family == "arc":
         if args.skip_validation:
             print("[WARN] --skip-validation enabled: skipping ARC pre-execution validation.")
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_validation_results,
+                    run_id,
+                    manifest=manifest,
+                    skipped=True,
+                )
         else:
-            validate_region_manifest(manifest)
+            try:
+                validate_region_manifest(manifest)
+                if db_store is not None and run_id:
+                    _db_safe_call(
+                        db_store.replace_validation_results,
+                        run_id,
+                        manifest=manifest,
+                    )
+            except ValueError as e:
+                print(f"[ERROR] {e}")
+                if db_store is not None and run_id:
+                    _db_safe_call(
+                        db_store.replace_validation_results,
+                        run_id,
+                        manifest=manifest,
+                        validation_failed_message=str(e),
+                    )
+                    _db_safe_call(
+                        db_store.update_run,
+                        run_id,
+                        status="failed",
+                        notes=str(e),
+                        ended_at=True,
+                    )
+                return 1
         control_region = _default_session_region(manifest, engine_family)
         session = boto3.Session(region_name=control_region)
 
@@ -217,6 +295,13 @@ def main() -> int:
         with open(impacted_resources_path, "w", encoding="utf-8") as f:
             f.write(pretty({"impacted_resources": impacted_resources}))
         print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "impacted_resources",
+                local_path=impacted_resources_path,
+                content_json={"impacted_resources": impacted_resources},
+            )
+        )
 
         arc_role_arn = args.arc_role_arn or ("REPLACE_ME" if args.dry_run else "")
         execution_plan = build_execution_plan(
@@ -231,9 +316,36 @@ def main() -> int:
         with open(execution_plan_path, "w", encoding="utf-8") as f:
             f.write(pretty(execution_plan))
         print(f"[OK] Wrote region execution plan JSON: {execution_plan_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "region_execution_plan",
+                local_path=execution_plan_path,
+                content_json=execution_plan,
+            )
+        )
+
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.replace_actions,
+                run_id,
+                manifest=manifest,
+                engine_family=engine_family,
+                dry_run=args.dry_run,
+                execution_plan=execution_plan,
+            )
+            _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+            _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
             print("[INFO] Dry-run enabled: skipping create/execute.")
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="completed",
+                    notes="Dry run completed; ARC plan was generated but not executed.",
+                    ended_at=True,
+                )
             return 0
 
         stop_event: Optional[Any] = None
@@ -281,17 +393,67 @@ def main() -> int:
             with open(result_path, "w", encoding="utf-8") as f:
                 f.write(pretty(summary))
             print(f"[OK] Wrote result summary JSON: {result_path}")
+            artifact_entries.append(
+                _artifact_entry(
+                    "result_summary",
+                    local_path=result_path,
+                    content_json=summary,
+                )
+            )
 
             print("[RESULT] Summary:")
             print(pretty(summary))
 
             report_path = generate_report(args.outdir, html_filename=report_filename)
             print(f"[OK] Wrote HTML report: {report_path}")
+            artifact_entries.append(
+                _artifact_entry(
+                    "html_report",
+                    local_path=report_path,
+                )
+            )
+            if isinstance(summary.get("observability"), dict):
+                artifact_entries.append(
+                    _artifact_entry(
+                        "observability_summary",
+                        content_json=summary.get("observability"),
+                    )
+                )
+
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_actions,
+                    run_id,
+                    manifest=manifest,
+                    engine_family=engine_family,
+                    dry_run=False,
+                    execution_plan=execution_plan,
+                    summary=summary,
+                )
+                _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+                _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
+                _db_safe_call(db_store.replace_metric_series, run_id, summary.get("observability"))
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status=_db_run_status(summary.get("status")),
+                    report_path=report_path,
+                    notes=summary.get("reason"),
+                    ended_at=True,
+                )
 
             if args.upload_artifactory and report_path:
                 upload_files_to_artifactory([report_path])
 
         except botocore.exceptions.ClientError as e:
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="failed",
+                    notes=str(e),
+                    ended_at=True,
+                )
             raise RuntimeError(f"AWS API error: {e}") from e
         finally:
             if stop_event is not None:
@@ -320,6 +482,13 @@ def main() -> int:
     session = boto3.Session(region_name=region)
     if args.skip_validation:
         print("[WARN] --skip-validation enabled: skipping pre-execution action validation.")
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.replace_validation_results,
+                run_id,
+                manifest=manifest,
+                skipped=True,
+            )
     else:
         try:
             validate_manifest_services(
@@ -327,11 +496,45 @@ def main() -> int:
                 session=session,
                 region=region,
             )
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_validation_results,
+                    run_id,
+                    manifest=manifest,
+                )
         except ValidationError as e:
             print(f"[ERROR] {e}")
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_validation_results,
+                    run_id,
+                    manifest=manifest,
+                    validation_failed_message=str(e),
+                )
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="failed",
+                    notes=str(e),
+                    ended_at=True,
+                )
             return 1
         except ValueError as e:
             print(f"[ERROR] {e}")
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_validation_results,
+                    run_id,
+                    manifest=manifest,
+                    validation_failed_message=str(e),
+                )
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="failed",
+                    notes=str(e),
+                    ended_at=True,
+                )
             return 1
 
     if engine_family == "custom":
@@ -348,15 +551,49 @@ def main() -> int:
         with open(execution_plan_path, "w", encoding="utf-8") as f:
             f.write(pretty(execution_plan))
         print(f"[OK] Wrote custom execution plan JSON: {execution_plan_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "custom_execution_plan",
+                local_path=execution_plan_path,
+                content_json=execution_plan,
+            )
+        )
 
         impacted_resources = collect_custom_impacted_resources(execution_plan)
         impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
         with open(impacted_resources_path, "w", encoding="utf-8") as f:
             f.write(pretty({"impacted_resources": impacted_resources}))
         print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "impacted_resources",
+                local_path=impacted_resources_path,
+                content_json={"impacted_resources": impacted_resources},
+            )
+        )
+
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.replace_actions,
+                run_id,
+                manifest=manifest,
+                engine_family=engine_family,
+                dry_run=args.dry_run,
+                execution_plan=execution_plan,
+            )
+            _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+            _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
             print("[INFO] Dry-run enabled: skipping create/execute.")
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="completed",
+                    notes="Dry run completed; custom execution plan was generated but not executed.",
+                    ended_at=True,
+                )
             return 0
 
         stop_event: Optional[Any] = None
@@ -404,17 +641,62 @@ def main() -> int:
             with open(result_path, "w", encoding="utf-8") as f:
                 f.write(pretty(summary))
             print(f"[OK] Wrote result summary JSON: {result_path}")
+            artifact_entries.append(
+                _artifact_entry(
+                    "result_summary",
+                    local_path=result_path,
+                    content_json=summary,
+                )
+            )
 
             print("[RESULT] Summary:")
             print(pretty(summary))
 
             report_path = generate_report(args.outdir, html_filename=report_filename)
             print(f"[OK] Wrote HTML report: {report_path}")
+            artifact_entries.append(_artifact_entry("html_report", local_path=report_path))
+            if isinstance(summary.get("observability"), dict):
+                artifact_entries.append(
+                    _artifact_entry(
+                        "observability_summary",
+                        content_json=summary.get("observability"),
+                    )
+                )
+
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.replace_actions,
+                    run_id,
+                    manifest=manifest,
+                    engine_family=engine_family,
+                    dry_run=False,
+                    execution_plan=execution_plan,
+                    summary=summary,
+                )
+                _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+                _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
+                _db_safe_call(db_store.replace_metric_series, run_id, summary.get("observability"))
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status=_db_run_status(summary.get("status")),
+                    report_path=report_path,
+                    notes=summary.get("reason"),
+                    ended_at=True,
+                )
 
             if args.upload_artifactory and report_path:
                 upload_files_to_artifactory([report_path])
 
         except botocore.exceptions.ClientError as e:
+            if db_store is not None and run_id:
+                _db_safe_call(
+                    db_store.update_run,
+                    run_id,
+                    status="failed",
+                    notes=str(e),
+                    ended_at=True,
+                )
             raise RuntimeError(f"AWS API error: {e}") from e
         finally:
             if stop_event is not None:
@@ -452,6 +734,13 @@ def main() -> int:
     with open(template_json_path, "w", encoding="utf-8") as f:
         f.write(pretty(payload))
     print(f"[OK] Wrote template payload JSON: {template_json_path}")
+    artifact_entries.append(
+        _artifact_entry(
+            "fis_template",
+            local_path=template_json_path,
+            content_json=payload,
+        )
+    )
 
     impacted_resources = collect_impacted_resources(
         manifest=manifest,
@@ -462,9 +751,36 @@ def main() -> int:
     with open(impacted_resources_path, "w", encoding="utf-8") as f:
         f.write(pretty({"impacted_resources": impacted_resources}))
     print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+    artifact_entries.append(
+        _artifact_entry(
+            "impacted_resources",
+            local_path=impacted_resources_path,
+            content_json={"impacted_resources": impacted_resources},
+        )
+    )
+
+    if db_store is not None and run_id:
+        _db_safe_call(
+            db_store.replace_actions,
+            run_id,
+            manifest=manifest,
+            engine_family=engine_family,
+            dry_run=args.dry_run,
+            fis_payload=payload,
+        )
+        _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+        _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
     if args.dry_run:
         print("[INFO] Dry-run enabled: skipping create/execute.")
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.update_run,
+                run_id,
+                status="completed",
+                notes="Dry run completed; FIS template was generated but not executed.",
+                ended_at=True,
+            )
         return 0
 
     fis_client = session.client("fis")
@@ -523,17 +839,62 @@ def main() -> int:
         with open(result_path, "w", encoding="utf-8") as f:
             f.write(pretty(summary))
         print(f"[OK] Wrote result summary JSON: {result_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "result_summary",
+                local_path=result_path,
+                content_json=summary,
+            )
+        )
 
         print("[RESULT] Summary:")
         print(pretty(summary))
 
         report_path = generate_report(args.outdir, html_filename=report_filename)
         print(f"[OK] Wrote HTML report: {report_path}")
+        artifact_entries.append(_artifact_entry("html_report", local_path=report_path))
+        if isinstance(summary.get("observability"), dict):
+            artifact_entries.append(
+                _artifact_entry(
+                    "observability_summary",
+                    content_json=summary.get("observability"),
+                )
+            )
+
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.replace_actions,
+                run_id,
+                manifest=manifest,
+                engine_family=engine_family,
+                dry_run=False,
+                fis_payload=payload,
+                summary=summary,
+            )
+            _db_safe_call(db_store.replace_impacted_resources, run_id, impacted_resources)
+            _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
+            _db_safe_call(db_store.replace_metric_series, run_id, summary.get("observability"))
+            _db_safe_call(
+                db_store.update_run,
+                run_id,
+                status=_db_run_status(summary.get("status")),
+                report_path=report_path,
+                notes=summary.get("reason"),
+                ended_at=True,
+            )
 
         if args.upload_artifactory and report_path:
             upload_files_to_artifactory([report_path])
 
     except botocore.exceptions.ClientError as e:
+        if db_store is not None and run_id:
+            _db_safe_call(
+                db_store.update_run,
+                run_id,
+                status="failed",
+                notes=str(e),
+                ended_at=True,
+            )
         raise RuntimeError(f"AWS API error: {e}") from e
     finally:
         if stop_event is not None:
