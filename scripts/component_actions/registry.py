@@ -301,7 +301,7 @@ def execute_custom_plan(
                     print(
                         f"[INFO] Skipping custom action {item.get('service')} "
                         f"because dependency action(s) did not complete successfully: {', '.join(failed_deps)}"
-                    )
+                    , flush=True)
                     results[item_name] = {
                         "name": item_name,
                         "status": "skipped",
@@ -318,7 +318,7 @@ def execute_custom_plan(
                     made_progress = True
                     continue
 
-                print(f"[INFO] Starting custom action: {item.get('service')} ({item_name})")
+                print(f"[INFO] Starting custom action: {item.get('service')} ({item_name})", flush=True)
                 running[executor.submit(_execute, item)] = item_name
                 pending.remove(item_name)
                 made_progress = True
@@ -349,7 +349,7 @@ def execute_custom_plan(
                     print(
                         f"[INFO] Finished custom action: {items_by_name[item_name].get('service')} "
                         f"({item_name}) status={result.get('status')}"
-                    )
+                    , flush=True)
                     made_progress = True
 
             if not made_progress and pending:

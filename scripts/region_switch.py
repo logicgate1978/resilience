@@ -228,7 +228,7 @@ def execute_region_plan(
                     print(
                         f"[INFO] Skipping region action {item.get('service')} "
                         f"because dependency action(s) did not complete successfully: {', '.join(failed_deps)}"
-                    )
+                    , flush=True)
                     results[item_name] = {
                         "name": item_name,
                         "engine": item.get("engine"),
@@ -246,7 +246,7 @@ def execute_region_plan(
                     made_progress = True
                     continue
 
-                print(f"[INFO] Starting region action: {item.get('service')} ({item_name})")
+                print(f"[INFO] Starting region action: {item.get('service')} ({item_name})", flush=True)
                 running[executor.submit(_execute, item)] = item_name
                 pending.remove(item_name)
                 made_progress = True
@@ -278,7 +278,7 @@ def execute_region_plan(
                     print(
                         f"[INFO] Finished region action: {items_by_name[item_name].get('service')} "
                         f"({item_name}) status={result.get('status')}"
-                    )
+                    , flush=True)
                     made_progress = True
 
             if not made_progress and pending:
@@ -570,10 +570,10 @@ def _execute_arc_item(
     plan_client = session.client("arc-region-switch", region_name=item["planControlRegion"])
     start_time = datetime.now(timezone.utc).isoformat()
 
-    print(f"[INFO] ARC is running: {item['service']}")
+    print(f"[INFO] ARC is running: {item['service']}", flush=True)
     plan = plan_client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
-    print(f"[OK] Created ARC Region switch plan: {plan_arn}")
+    print(f"[OK] Created ARC Region switch plan: {plan_arn}", flush=True)
 
     request = dict(item["request"])
     execution_client = session.client("arc-region-switch", region_name=request["targetRegion"])
@@ -586,7 +586,7 @@ def _execute_arc_item(
         timeout_seconds=min(timeout_seconds, 300),
     )
     execution_id = execution["executionId"]
-    print(f"[OK] Started ARC Region switch executionId: {execution_id}")
+    print(f"[OK] Started ARC Region switch executionId: {execution_id}", flush=True)
 
     final_execution = _wait_for_arc_execution(
         client=execution_client,
@@ -634,7 +634,7 @@ def _start_arc_plan_execution_with_retry(
     last_error: Exception | None = None
     attempt = 0
 
-    print(f"[INFO] Waiting for ARC plan to become executable: {plan_arn}")
+    print(f"[INFO] Waiting for ARC plan to become executable: {plan_arn}", flush=True)
 
     while time.time() < deadline:
         try:
@@ -643,7 +643,7 @@ def _start_arc_plan_execution_with_retry(
             last_error = exc
             attempt += 1
             if attempt == 1 or attempt % 3 == 0:
-                print(f"[INFO] ARC plan not ready yet (attempt {attempt}): {exc}")
+                print(f"[INFO] ARC plan not ready yet (attempt {attempt}): {exc}", flush=True)
             sleep_seconds = max(1, poll_seconds)
             time.sleep(sleep_seconds)
 
@@ -665,7 +665,7 @@ def _execute_sdk_item(
     print(
         f"[INFO] Starting non-ARC region action {item['action']} via {request['sdkApi']} "
         f"in region {item['clientRegion']}"
-    )
+    , flush=True)
 
     sdk_api = getattr(client, request["sdkApi"])
     response = sdk_api(**request["params"])
@@ -710,7 +710,7 @@ def _execute_region_eks_item(
     print(
         f"[INFO] Starting region custom action {item['service']} in region {item['region']} "
         f"for deployment {namespace}/{deployment_name}"
-    )
+    , flush=True)
 
     try:
         api = create_apps_v1_api(session, item["region"], cluster_identifier)
@@ -838,7 +838,7 @@ def _execute_region_dns_item(
     poll_seconds: int,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
-    print(f"[INFO] Starting region custom action {item['service']}")
+    print(f"[INFO] Starting region custom action {item['service']}", flush=True)
     return DNSAction().execute_item(
         session=session,
         item=item,
@@ -874,7 +874,7 @@ def _wait_for_arc_execution(
         print(
             f"[INFO] ARC is running: executionId={execution_id} status={status} "
             f"elapsed={int(time.time() - start)}s"
-        )
+        , flush=True)
         time.sleep(poll_seconds)
 
 

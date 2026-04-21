@@ -225,7 +225,7 @@ def upload_files_to_artifactory(filenames):
     artifactory_username, api_key = artifactory_api_key.split(':')
 
     # upload files to Artifactory
-    print('===== uploading files to Artifactory')
+    print('===== uploading files to Artifactory', flush=True)
     auth = (artifactory_username, api_key)
     artifactory_url = 'https://artifactory.global.standardchartered.com/artifactory/generic-cloud/com/sc/cloud/deploy/release/inventory/monthly-summary-report'
 
@@ -234,14 +234,14 @@ def upload_files_to_artifactory(filenames):
         if artifactory_filename == filename:
             artifactory_filename = os.path.basename(filename)
         url = artifactory_url + '/' + artifactory_filename
-        print(f'===== artifactory_filename: {artifactory_filename}')
-        print(f'===== url: {url}')
+        print(f'===== artifactory_filename: {artifactory_filename}', flush=True)
+        print(f'===== url: {url}', flush=True)
 
         with open(filename, 'rb') as fobj:
             res = requests.put(url, auth=auth, data=fobj)
-            print(f'===== res: {res}')
+            print(f'===== res: {res}', flush=True)
 
             if res.ok:
-                print(f'===== SUCCESS!! File has been uploaded successfully to Artifactory: {url}')
+                print(f'===== SUCCESS!! File has been uploaded successfully to Artifactory: {url}', flush=True)
             else:
-                print(f'===== FAIL!! There was an error while uploading the file to Artifactory: {url}')
+                print(f'===== FAIL!! There was an error while uploading the file to Artifactory: {url}', flush=True)

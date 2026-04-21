@@ -148,7 +148,7 @@ def wait_for_completion(
             return exp
         if time.time() - start > timeout_seconds:
             raise TimeoutError(f"Experiment {experiment_id} timed out after {timeout_seconds}s (last={status}).")
-        print(f"[INFO] FIS is running: experimentId={experiment_id} status={status} elapsed={int(time.time()-start)}s")
+        print(f"[INFO] FIS is running: experimentId={experiment_id} status={status} elapsed={int(time.time()-start)}s", flush=True)
         time.sleep(poll_seconds)
 
 
@@ -184,7 +184,7 @@ def _db_safe_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except Exception as e:
-        print(f"[WARN] Database persistence error: {e}")
+        print(f"[WARN] Database persistence error: {e}", flush=True)
         return None
 
 
@@ -251,7 +251,7 @@ def main() -> int:
 
     if engine_family == "arc":
         if args.skip_validation:
-            print("[WARN] --skip-validation enabled: skipping ARC pre-execution validation.")
+            print("[WARN] --skip-validation enabled: skipping ARC pre-execution validation.", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.replace_validation_results,
@@ -269,7 +269,7 @@ def main() -> int:
                         manifest=manifest,
                     )
             except ValueError as e:
-                print(f"[ERROR] {e}")
+                print(f"[ERROR] {e}", flush=True)
                 if db_store is not None and run_id:
                     _db_safe_call(
                         db_store.replace_validation_results,
@@ -301,7 +301,7 @@ def main() -> int:
         impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
         with open(impacted_resources_path, "w", encoding="utf-8") as f:
             f.write(pretty({"impacted_resources": impacted_resources}))
-        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}", flush=True)
         artifact_entries.append(
             _artifact_entry(
                 "impacted_resources",
@@ -322,7 +322,7 @@ def main() -> int:
         execution_plan_path = os.path.join(args.outdir, f"region_execution_plan_{plan_name}.json")
         with open(execution_plan_path, "w", encoding="utf-8") as f:
             f.write(pretty(execution_plan))
-        print(f"[OK] Wrote region execution plan JSON: {execution_plan_path}")
+        print(f"[OK] Wrote region execution plan JSON: {execution_plan_path}", flush=True)
         artifact_entries.append(
             _artifact_entry(
                 "region_execution_plan",
@@ -344,7 +344,7 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
-            print("[INFO] Dry-run enabled: skipping create/execute.")
+            print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.update_run,
@@ -374,7 +374,7 @@ def main() -> int:
             stop_after_min = int(obs_cfg.get("stop_after") or 0)
 
             if start_before_min > 0:
-                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting region switch...")
+                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting region switch...", flush=True)
                 time.sleep(start_before_min * 60)
 
             summary = execute_region_plan(
@@ -385,7 +385,7 @@ def main() -> int:
             )
 
             if stop_after_min > 0:
-                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...", flush=True)
                 time.sleep(stop_after_min * 60)
 
             if stop_event is not None:
@@ -399,7 +399,7 @@ def main() -> int:
             result_path = os.path.join(args.outdir, f"result_{plan_name}.json")
             with open(result_path, "w", encoding="utf-8") as f:
                 f.write(pretty(summary))
-            print(f"[OK] Wrote result summary JSON: {result_path}")
+            print(f"[OK] Wrote result summary JSON: {result_path}", flush=True)
             artifact_entries.append(
                 _artifact_entry(
                     "result_summary",
@@ -408,11 +408,11 @@ def main() -> int:
                 )
             )
 
-            print("[RESULT] Summary:")
-            print(pretty(summary))
+            print("[RESULT] Summary:", flush=True)
+            print(pretty(summary), flush=True)
 
             report_path = generate_report(args.outdir, html_filename=report_filename)
-            print(f"[OK] Wrote HTML report: {report_path}")
+            print(f"[OK] Wrote HTML report: {report_path}", flush=True)
             artifact_entries.append(
                 _artifact_entry(
                     "html_report",
@@ -474,7 +474,7 @@ def main() -> int:
             if report_path is None:
                 try:
                     rp = generate_report(args.outdir, html_filename=report_filename)
-                    print(f"[OK] Wrote HTML report: {rp}")
+                    print(f"[OK] Wrote HTML report: {rp}", flush=True)
                     if args.upload_artifactory:
                         upload_files_to_artifactory([rp])
                 except Exception:
@@ -492,7 +492,7 @@ def main() -> int:
         session = boto3.Session(region_name=region)
 
     if args.skip_validation:
-        print("[WARN] --skip-validation enabled: skipping pre-execution action validation.")
+        print("[WARN] --skip-validation enabled: skipping pre-execution action validation.", flush=True)
         if db_store is not None and run_id:
             _db_safe_call(
                 db_store.replace_validation_results,
@@ -514,7 +514,7 @@ def main() -> int:
                     manifest=manifest,
                 )
         except ValidationError as e:
-            print(f"[ERROR] {e}")
+            print(f"[ERROR] {e}", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.replace_validation_results,
@@ -531,7 +531,7 @@ def main() -> int:
                 )
             return 1
         except ValueError as e:
-            print(f"[ERROR] {e}")
+            print(f"[ERROR] {e}", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.replace_validation_results,
@@ -561,7 +561,7 @@ def main() -> int:
         execution_plan_path = os.path.join(args.outdir, f"custom_execution_plan_{plan_name}.json")
         with open(execution_plan_path, "w", encoding="utf-8") as f:
             f.write(pretty(execution_plan))
-        print(f"[OK] Wrote custom execution plan JSON: {execution_plan_path}")
+        print(f"[OK] Wrote custom execution plan JSON: {execution_plan_path}", flush=True)
         artifact_entries.append(
             _artifact_entry(
                 "custom_execution_plan",
@@ -574,7 +574,7 @@ def main() -> int:
         impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
         with open(impacted_resources_path, "w", encoding="utf-8") as f:
             f.write(pretty({"impacted_resources": impacted_resources}))
-        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+        print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}", flush=True)
         artifact_entries.append(
             _artifact_entry(
                 "impacted_resources",
@@ -596,7 +596,7 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
-            print("[INFO] Dry-run enabled: skipping create/execute.")
+            print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.update_run,
@@ -626,7 +626,7 @@ def main() -> int:
             stop_after_min = int(obs_cfg.get("stop_after") or 0)
 
             if start_before_min > 0:
-                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting custom action...")
+                print(f"[INFO] start_before={start_before_min} minutes: waiting before starting custom action...", flush=True)
                 time.sleep(start_before_min * 60)
 
             summary = execute_custom_plan(
@@ -637,7 +637,7 @@ def main() -> int:
             )
 
             if stop_after_min > 0:
-                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+                print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...", flush=True)
                 time.sleep(stop_after_min * 60)
 
             if stop_event is not None:
@@ -651,7 +651,7 @@ def main() -> int:
             result_path = os.path.join(args.outdir, f"result_{plan_name}.json")
             with open(result_path, "w", encoding="utf-8") as f:
                 f.write(pretty(summary))
-            print(f"[OK] Wrote result summary JSON: {result_path}")
+            print(f"[OK] Wrote result summary JSON: {result_path}", flush=True)
             artifact_entries.append(
                 _artifact_entry(
                     "result_summary",
@@ -660,11 +660,11 @@ def main() -> int:
                 )
             )
 
-            print("[RESULT] Summary:")
-            print(pretty(summary))
+            print("[RESULT] Summary:", flush=True)
+            print(pretty(summary), flush=True)
 
             report_path = generate_report(args.outdir, html_filename=report_filename)
-            print(f"[OK] Wrote HTML report: {report_path}")
+            print(f"[OK] Wrote HTML report: {report_path}", flush=True)
             artifact_entries.append(_artifact_entry("html_report", local_path=report_path))
             if isinstance(summary.get("observability"), dict):
                 artifact_entries.append(
@@ -721,7 +721,7 @@ def main() -> int:
             if report_path is None:
                 try:
                     rp = generate_report(args.outdir, html_filename=report_filename)
-                    print(f"[OK] Wrote HTML report: {rp}")
+                    print(f"[OK] Wrote HTML report: {rp}", flush=True)
                     if args.upload_artifactory:
                         upload_files_to_artifactory([rp])
                 except Exception:
@@ -744,7 +744,7 @@ def main() -> int:
     template_json_path = os.path.join(args.outdir, f"template_payload_{template_name}.json")
     with open(template_json_path, "w", encoding="utf-8") as f:
         f.write(pretty(payload))
-    print(f"[OK] Wrote template payload JSON: {template_json_path}")
+    print(f"[OK] Wrote template payload JSON: {template_json_path}", flush=True)
     artifact_entries.append(
         _artifact_entry(
             "fis_template",
@@ -761,7 +761,7 @@ def main() -> int:
     impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
     with open(impacted_resources_path, "w", encoding="utf-8") as f:
         f.write(pretty({"impacted_resources": impacted_resources}))
-    print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}")
+    print(f"[OK] Wrote impacted resources JSON: {impacted_resources_path}", flush=True)
     artifact_entries.append(
         _artifact_entry(
             "impacted_resources",
@@ -783,7 +783,7 @@ def main() -> int:
         _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
     if args.dry_run:
-        print("[INFO] Dry-run enabled: skipping create/execute.")
+        print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
         if db_store is not None and run_id:
             _db_safe_call(
                 db_store.update_run,
@@ -804,7 +804,7 @@ def main() -> int:
 
     try:
         template_id = create_template(fis_client, payload)
-        print(f"[OK] Created experimentTemplateId: {template_id}")
+        print(f"[OK] Created experimentTemplateId: {template_id}", flush=True)
 
         stop_event, obs_results, obs_threads = start_observability_collectors(
             manifest=manifest,
@@ -819,12 +819,12 @@ def main() -> int:
         stop_after_min = int(obs_cfg.get("stop_after") or 0)
 
         if start_before_min > 0:
-            print(f"[INFO] start_before={start_before_min} minutes: waiting before starting experiment...")
+            print(f"[INFO] start_before={start_before_min} minutes: waiting before starting experiment...", flush=True)
             time.sleep(start_before_min * 60)
 
-        print("[INFO] FIS is running...")
+        print("[INFO] FIS is running...", flush=True)
         exp_id = start_experiment(fis_client, template_id)
-        print(f"[OK] Started experimentId: {exp_id}")
+        print(f"[OK] Started experimentId: {exp_id}", flush=True)
 
         final_exp = wait_for_completion(
             fis_client,
@@ -835,7 +835,7 @@ def main() -> int:
         summary = summarize_experiment(final_exp)
 
         if stop_after_min > 0:
-            print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...")
+            print(f"[INFO] stop_after={stop_after_min} minutes: continuing observability collection...", flush=True)
             time.sleep(stop_after_min * 60)
 
         if stop_event is not None:
@@ -849,7 +849,7 @@ def main() -> int:
         result_path = os.path.join(args.outdir, f"result_{template_name}.json")
         with open(result_path, "w", encoding="utf-8") as f:
             f.write(pretty(summary))
-        print(f"[OK] Wrote result summary JSON: {result_path}")
+        print(f"[OK] Wrote result summary JSON: {result_path}", flush=True)
         artifact_entries.append(
             _artifact_entry(
                 "result_summary",
@@ -858,11 +858,11 @@ def main() -> int:
             )
         )
 
-        print("[RESULT] Summary:")
-        print(pretty(summary))
+        print("[RESULT] Summary:", flush=True)
+        print(pretty(summary), flush=True)
 
         report_path = generate_report(args.outdir, html_filename=report_filename)
-        print(f"[OK] Wrote HTML report: {report_path}")
+        print(f"[OK] Wrote HTML report: {report_path}", flush=True)
         artifact_entries.append(_artifact_entry("html_report", local_path=report_path))
         if isinstance(summary.get("observability"), dict):
             artifact_entries.append(
@@ -919,7 +919,7 @@ def main() -> int:
         if report_path is None:
             try:
                 rp = generate_report(args.outdir, html_filename=report_filename)
-                print(f"[OK] Wrote HTML report: {rp}")
+                print(f"[OK] Wrote HTML report: {rp}", flush=True)
                 if args.upload_artifactory:
                     upload_files_to_artifactory([rp])
             except Exception:

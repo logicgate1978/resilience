@@ -585,4 +585,4 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     p = generate_report(args.outdir, args.html)
-    print(f"[OK] Wrote report: {p}")
+    print(f"[OK] Wrote report: {p}", flush=True)
