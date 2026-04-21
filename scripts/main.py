@@ -33,6 +33,7 @@ from utility import (
     pretty,
     resolve_service_primary_region,
     resolve_service_region,
+    resolve_service_zone,
     upload_files_to_artifactory,
 )
 from validations import ValidationError, validate_manifest_services
@@ -210,6 +211,356 @@ def _db_run_status(value: Any) -> str:
     return "failed" if text else "completed"
 
 
+def _service_occurrence_refs(manifest: Dict[str, Any]) -> Dict[int, str]:
+    services = _manifest_services(manifest)
+    totals: Dict[str, int] = {}
+    normalized: List[tuple[str, str]] = []
+    for svc in services:
+        service_name = normalize_service_name(svc.get("name"))
+        action_name = str(svc.get("action") or "").strip().lower()
+        normalized.append((service_name, action_name))
+        key = f"{service_name}:{action_name}"
+        totals[key] = totals.get(key, 0) + 1
+
+    refs: Dict[int, str] = {}
+    seen: Dict[str, int] = {}
+    for index, (service_name, action_name) in enumerate(normalized, start=1):
+        key = f"{service_name}:{action_name}"
+        seen[key] = seen.get(key, 0) + 1
+        refs[index] = key if totals[key] == 1 else f"{key}#{seen[key]}"
+    return refs
+
+
+def _build_single_service_manifest(manifest: Dict[str, Any], svc: Dict[str, Any]) -> Dict[str, Any]:
+    scoped = dict(manifest)
+    scoped["services"] = [svc]
+    return scoped
+
+
+def _collect_service_impacted_resources(
+    *,
+    manifest: Dict[str, Any],
+    svc: Dict[str, Any],
+    session,
+    default_region: Optional[str],
+) -> List[Dict[str, Any]]:
+    scoped_manifest = _build_single_service_manifest(manifest, svc)
+    return collect_impacted_resources(
+        manifest=scoped_manifest,
+        session=session,
+        region=default_region,
+    )
+
+
+def _short_resource_label(arn: str) -> str:
+    text = str(arn or "").strip()
+    if not text:
+        return "-"
+    if text.startswith("arn:"):
+        if "/" in text:
+            return text.rsplit("/", 1)[-1]
+        if ":" in text:
+            return text.rsplit(":", 1)[-1]
+    if text.startswith("route53://"):
+        return text.replace("route53://", "", 1)
+    if text.startswith("eks://"):
+        return text.replace("eks://", "", 1)
+    return text
+
+
+def _summarize_impacted_resources(resources: List[Dict[str, Any]]) -> str:
+    if not resources:
+        return "-"
+    labels = [_short_resource_label(item.get("arn") or "") for item in resources]
+    labels = [label for label in labels if label]
+    if not labels:
+        return "-"
+    if len(labels) <= 3:
+        return ", ".join(labels)
+    return ", ".join(labels[:3]) + f" (+{len(labels) - 3} more)"
+
+
+def _format_start_after(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        parts = [str(v).strip() for v in value if str(v).strip()]
+        return ", ".join(parts) if parts else "-"
+    text = str(value).strip()
+    return text or "-"
+
+
+def _stringify_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value)
+    if isinstance(value, dict):
+        return ",".join(f"{k}={_stringify_value(v)}" for k, v in value.items())
+    return str(value)
+
+
+def _format_key_parameters(data: Dict[str, Any]) -> str:
+    if not isinstance(data, dict) or not data:
+        return "-"
+    parts = []
+    for key, value in data.items():
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        parts.append(f"{key}={_stringify_value(value)}")
+    return ", ".join(parts) if parts else "-"
+
+
+def _truncate(value: str, width: int) -> str:
+    text = str(value or "")
+    if len(text) <= width:
+        return text
+    if width <= 3:
+        return text[:width]
+    return text[: width - 3] + "..."
+
+
+def _render_ascii_table(headers: List[str], rows: List[List[str]]) -> str:
+    max_widths = {
+        "No": 4,
+        "Action": 28,
+        "Engine": 8,
+        "Exec Type": 34,
+        "Region": 18,
+        "Zone": 16,
+        "Start After": 24,
+        "Impacted Count": 14,
+        "Impacted Resources": 52,
+        "Key Parameters": 52,
+    }
+    widths: List[int] = []
+    for idx, header in enumerate(headers):
+        values = [header] + [str(row[idx]) for row in rows]
+        width = max(len(v) for v in values) if values else len(header)
+        widths.append(min(width, max_widths.get(header, width)))
+
+    def format_row(values: List[str]) -> str:
+        cells = []
+        for idx, value in enumerate(values):
+            cells.append(" " + _truncate(str(value), widths[idx]).ljust(widths[idx]) + " ")
+        return "|" + "|".join(cells) + "|"
+
+    separator = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+    out = [separator, format_row(headers), separator]
+    for row in rows:
+        out.append(format_row(row))
+    out.append(separator)
+    return "\n".join(out)
+
+
+def _build_fis_dry_run_rows(
+    *,
+    manifest: Dict[str, Any],
+    payload: Dict[str, Any],
+    session,
+    default_region: Optional[str],
+) -> List[List[str]]:
+    rows: List[List[str]] = []
+    refs = _service_occurrence_refs(manifest)
+    services = _manifest_services(manifest)
+    actions = payload.get("actions") or {}
+
+    for index, svc in enumerate(services, start=1):
+        service_name = normalize_service_name(svc.get("name"))
+        action_name = str(svc.get("action") or "").strip().lower()
+        action_key = refs.get(index) or f"{service_name}:{action_name}"
+        execution_name = f"a_{service_name}_{action_name}_{index}"
+        action_obj = actions.get(execution_name) or {}
+        impacted = _collect_service_impacted_resources(
+            manifest=manifest,
+            svc=svc,
+            session=session,
+            default_region=default_region,
+        )
+        rows.append(
+            [
+                str(index),
+                action_key,
+                "FIS",
+                str(action_obj.get("actionId") or "-"),
+                str(resolve_service_region(manifest, svc) or "-"),
+                str(resolve_service_zone(manifest, svc) or "-"),
+                _format_start_after(svc.get("start_after")),
+                str(len(impacted)),
+                _summarize_impacted_resources(impacted),
+                _format_key_parameters(action_obj.get("parameters") or {}),
+            ]
+        )
+    return rows
+
+
+def _custom_exec_type(item: Dict[str, Any]) -> str:
+    target = item.get("target") or {}
+    if item.get("service") == "efs:failover":
+        return "delete replication config"
+    if item.get("service") == "efs:failback":
+        return "create reverse replication"
+    if item.get("service") == "asg:scale":
+        return "update ASG capacity"
+    if item.get("service") == "dns:set-value":
+        return "update Route53 record"
+    if item.get("service") == "dns:set-weight":
+        return "update Route53 weights"
+    if item.get("service") == "s3:failover":
+        return "update MRAP routing"
+    if item.get("service") == "common:wait":
+        return "python sleep"
+    if item.get("service") == "eks:scale-deployment":
+        return f"scale deployment {target.get('deploymentName') or ''}".strip()
+    if item.get("service") == "rds:failover-global-db":
+        return "failover_global_cluster"
+    if item.get("service") == "rds:switchover-global-db":
+        return "switchover_global_cluster"
+    return str(item.get("description") or item.get("action") or "custom")
+
+
+def _build_custom_dry_run_rows(
+    *,
+    manifest: Dict[str, Any],
+    execution_plan: Dict[str, Any],
+    session,
+    default_region: Optional[str],
+) -> List[List[str]]:
+    rows: List[List[str]] = []
+    refs = _service_occurrence_refs(manifest)
+    services = _manifest_services(manifest)
+    items = list(execution_plan.get("items") or [])
+
+    for index, (svc, item) in enumerate(zip(services, items), start=1):
+        impacted = list(item.get("impacted_resources") or [])
+        if not impacted and isinstance(item.get("impacted_resource"), dict):
+            impacted = [item.get("impacted_resource")]
+        if not impacted:
+            impacted = _collect_service_impacted_resources(
+                manifest=manifest,
+                svc=svc,
+                session=session,
+                default_region=default_region,
+            )
+        rows.append(
+            [
+                str(index),
+                refs.get(index) or str(item.get("service") or "-"),
+                "Custom",
+                _custom_exec_type(item),
+                str(item.get("region") or resolve_service_region(manifest, svc) or "-"),
+                str(resolve_service_zone(manifest, svc) or "-"),
+                _format_start_after(item.get("startAfter") or svc.get("start_after")),
+                str(len(impacted)),
+                _summarize_impacted_resources(impacted),
+                _format_key_parameters(item.get("parameters") or {}),
+            ]
+        )
+    return rows
+
+
+def _build_arc_dry_run_rows(
+    *,
+    manifest: Dict[str, Any],
+    execution_plan: Dict[str, Any],
+    session,
+    default_region: Optional[str],
+) -> List[List[str]]:
+    rows: List[List[str]] = []
+    refs = _service_occurrence_refs(manifest)
+    services = _manifest_services(manifest)
+    items = list(execution_plan.get("items") or [])
+
+    for index, (svc, item) in enumerate(zip(services, items), start=1):
+        impacted = _collect_service_impacted_resources(
+            manifest=manifest,
+            svc=svc,
+            session=session,
+            default_region=default_region,
+        )
+        if item.get("engine") == "arc":
+            exec_type = "AuroraGlobalDatabase/activate"
+            region_value = item.get("request", {}).get("targetRegion") or item.get("planControlRegion") or "-"
+            params = {
+                "action": item.get("request", {}).get("action"),
+                "mode": item.get("request", {}).get("mode"),
+            }
+        else:
+            exec_type = str(item.get("request", {}).get("sdkApi") or item.get("action") or "-")
+            region_value = item.get("clientRegion") or item.get("region") or "-"
+            params = item.get("request", {}).get("params") or item.get("parameters") or {}
+
+        rows.append(
+            [
+                str(index),
+                refs.get(index) or str(item.get("service") or "-"),
+                "ARC",
+                exec_type,
+                str(region_value),
+                str(resolve_service_zone(manifest, svc) or "-"),
+                _format_start_after(item.get("startAfter") or svc.get("start_after")),
+                str(len(impacted)),
+                _summarize_impacted_resources(impacted),
+                _format_key_parameters(params),
+            ]
+        )
+    return rows
+
+
+def _build_dry_run_summary_text(
+    *,
+    manifest_path: str,
+    engine_family: str,
+    rows: List[List[str]],
+) -> str:
+    headers = [
+        "No",
+        "Action",
+        "Engine",
+        "Exec Type",
+        "Region",
+        "Zone",
+        "Start After",
+        "Impacted Count",
+        "Impacted Resources",
+        "Key Parameters",
+    ]
+    parallel_note = "actions without start_after will run in parallel"
+    total_impacted = 0
+    for row in rows:
+        try:
+            total_impacted += int(row[7])
+        except Exception:
+            pass
+
+    lines = [
+        "DRY RUN APPROVAL SUMMARY",
+        f"Manifest: {manifest_path}",
+        f"Engine family: {engine_family.upper()}",
+        f"Actions: {len(rows)}",
+        f"Impacted resources: {total_impacted}",
+        f"Note: {parallel_note}",
+        "",
+        _render_ascii_table(headers, rows),
+    ]
+    return "\n".join(lines)
+
+
+def _write_dry_run_summary(
+    *,
+    outdir: str,
+    name: str,
+    text: str,
+) -> str:
+    path = os.path.join(outdir, f"dry_run_approval_summary_{name}.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.write("\n")
+    return path
+
+
 def main() -> int:
     env_defaults = load_env_file(ENV_PATH)
 
@@ -344,6 +695,27 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
+            dry_run_rows = _build_arc_dry_run_rows(
+                manifest=manifest,
+                execution_plan=execution_plan,
+                session=session,
+                default_region=control_region,
+            )
+            dry_run_text = _build_dry_run_summary_text(
+                manifest_path=os.path.abspath(args.manifest),
+                engine_family=engine_family,
+                rows=dry_run_rows,
+            )
+            dry_run_summary_path = _write_dry_run_summary(
+                outdir=args.outdir,
+                name=plan_name,
+                text=dry_run_text,
+            )
+            print(dry_run_text, flush=True)
+            print(f"[OK] Wrote dry-run approval summary: {dry_run_summary_path}", flush=True)
+            artifact_entries.append(_artifact_entry("other", local_path=dry_run_summary_path))
+            if db_store is not None and run_id:
+                _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
             print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
@@ -596,6 +968,27 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
+            dry_run_rows = _build_custom_dry_run_rows(
+                manifest=manifest,
+                execution_plan=execution_plan,
+                session=session,
+                default_region=region,
+            )
+            dry_run_text = _build_dry_run_summary_text(
+                manifest_path=os.path.abspath(args.manifest),
+                engine_family=engine_family,
+                rows=dry_run_rows,
+            )
+            dry_run_summary_path = _write_dry_run_summary(
+                outdir=args.outdir,
+                name=plan_name,
+                text=dry_run_text,
+            )
+            print(dry_run_text, flush=True)
+            print(f"[OK] Wrote dry-run approval summary: {dry_run_summary_path}", flush=True)
+            artifact_entries.append(_artifact_entry("other", local_path=dry_run_summary_path))
+            if db_store is not None and run_id:
+                _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
             print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
             if db_store is not None and run_id:
                 _db_safe_call(
@@ -783,6 +1176,27 @@ def main() -> int:
         _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
     if args.dry_run:
+        dry_run_rows = _build_fis_dry_run_rows(
+            manifest=manifest,
+            payload=payload,
+            session=session,
+            default_region=region,
+        )
+        dry_run_text = _build_dry_run_summary_text(
+            manifest_path=os.path.abspath(args.manifest),
+            engine_family=engine_family,
+            rows=dry_run_rows,
+        )
+        dry_run_summary_path = _write_dry_run_summary(
+            outdir=args.outdir,
+            name=template_name,
+            text=dry_run_text,
+        )
+        print(dry_run_text, flush=True)
+        print(f"[OK] Wrote dry-run approval summary: {dry_run_summary_path}", flush=True)
+        artifact_entries.append(_artifact_entry("other", local_path=dry_run_summary_path))
+        if db_store is not None and run_id:
+            _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
         print("[INFO] Dry-run enabled: skipping create/execute.", flush=True)
         if db_store is not None and run_id:
             _db_safe_call(

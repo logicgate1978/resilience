@@ -1524,6 +1524,16 @@ Dry run writes payload and discovery artifacts but does not create or execute th
 python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn> --dry-run
 ```
 
+Dry run also prints an approver-friendly ASCII table that summarizes:
+
+- each planned action
+- the execution engine and action type
+- dependencies from `start_after`
+- impacted resource counts and resolved resource examples
+- key action parameters
+
+The same table is written to `outdir` as `dry_run_approval_summary_<name>.txt`.
+
 ### Runtime Logging
 
 During execution, the framework now prints lightweight progress logs:
