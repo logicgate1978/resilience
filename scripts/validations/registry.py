@@ -101,4 +101,12 @@ def validate_manifest_services(
             zone=service_zone,
         )
         for validation_name in validation_names:
+            print(
+                f"[INFO] Running validation: {action_key} -> {validation_name}",
+                flush=True,
+            )
             validator.run(validation_name, context)
+            print(
+                f"[OK] Validation passed: {action_key} -> {validation_name}",
+                flush=True,
+            )

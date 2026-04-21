@@ -66,14 +66,19 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
             raise ValueError(f"services[{i}] must be an object.")
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
+        action_key = f"{name}:{action}"
+        print(f"[INFO] Running region validation: {action_key}", flush=True)
         if name == "rds" and action in REGION_ACTION_CONFIG:
             _validate_region_rds_service(manifest, svc, i)
+            print(f"[OK] Region validation passed: {action_key}", flush=True)
             continue
         if name == "eks" and action == "scale-deployment":
             _validate_region_eks_service(manifest, svc, i)
+            print(f"[OK] Region validation passed: {action_key}", flush=True)
             continue
         if name == "dns" and action in ("set-value", "set-weight"):
             _validate_region_dns_service(svc, i)
+            print(f"[OK] Region validation passed: {action_key}", flush=True)
             continue
         raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
 

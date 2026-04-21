@@ -1528,6 +1528,7 @@ python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 
 During execution, the framework now prints lightweight progress logs:
 
+- validations log when each configured validation starts and passes
 - custom actions log when each action starts, finishes, or is skipped
 - FIS runs log generic `FIS is running` progress messages while the experiment is active
 - ARC runs log generic `ARC is running` progress messages while the region action is active
