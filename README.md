@@ -684,7 +684,6 @@ You can bypass these pre-execution checks with the CLI flag `--skip-validation`.
 | `network` | `network:disrupt-vpc-endpoint` | `verify_vpc_endpoint_type` | `service.target.vpc_endpoint_type`, when provided, must be `Interface`, which is the only VPC endpoint type supported by the FIS action. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. When `service.target.vpc_endpoint_type` is omitted, the framework defaults it to `Interface` during discovery. |
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
-| `rds` | `rds:reboot` | `verify_replica` | Each selected DB instance has Multi-AZ enabled or has at least one read replica. |
 | `rds` | `rds:failover` | `verify_resource_existence` | At least one DB cluster matches the selector. |
 | `rds` | `rds:failover` | `verify_replica` | Each selected DB cluster has at least one non-writer replica/reader member available for failover. |
 | `s3` | `s3:pause-replication` | `verify_resource_existence` | At least one S3 bucket matches the selector. |

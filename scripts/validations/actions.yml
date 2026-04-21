@@ -34,7 +34,6 @@ actions:
   - action: rds:reboot
     validations:
       - verify_resource_existence
-      - verify_replica
   - action: rds:failover
     validations:
       - verify_resource_existence
