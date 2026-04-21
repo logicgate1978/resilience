@@ -38,7 +38,7 @@ from utility import (
 from validations import ValidationError, validate_manifest_services
 
 from chart import generate_report
-
+from auth import AccessController
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(SCRIPT_DIR)
@@ -214,15 +214,18 @@ def main() -> int:
     env_defaults = load_env_file(ENV_PATH)
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "geo-1.yml")), help="Path to manifest.yml")
-    ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", 'arn:aws:iam::065476698259:role/service-role/AWSFISIAMRole-1773418476063'), help="FIS IAM role ARN (required unless --dry-run)")
-    ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", "arn:aws:iam::065476698259:role/RegionSwitchPlanExecutionRole"), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
+    ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "main.yml")), help="Path to manifest.yml")
+    ap.add_argument("--account-id", default=_env_value(env_defaults, "ACCOUNT_ID", None), help="AWS Account ID to run the experiment in")
+    ap.add_argument("--username", default=_env_value(env_defaults, "USERNAME", None), help="Username of the service account")
+    ap.add_argument("--password", help="Password of the service account")
+    ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", None), help="FIS IAM role ARN (required unless --dry-run)")
+    ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", None), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
     ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--db-dsn", default=_env_value(env_defaults, "DB_DSN", _env_value(env_defaults, "DATABASE_URL", "")), help="Optional PostgreSQL DSN for persisting run metadata and artifacts")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--skip-validation", action="store_true", help="Skip pre-execution action validation and continue directly to planning/execution")
     ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
-    ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 3600), help="Timeout per experiment in seconds")
+    ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 7200), help="Timeout per experiment in seconds")
     ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
 
@@ -283,7 +286,11 @@ def main() -> int:
                     )
                 return 1
         control_region = _default_session_region(manifest, engine_family)
-        session = boto3.Session(region_name=control_region)
+
+        if args.account_id and args.username and args.password:
+            session = AccessController(args.account_id, control_region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
+        else:
+            session = boto3.Session(region_name=control_region)
 
         resolved_targets = resolve_region_targets(manifest, session)
         impacted_resources = collect_impacted_resources(
@@ -479,7 +486,11 @@ def main() -> int:
     if not region and engine_family == "fis":
         raise ValueError("FIS actions require region at the top level or service level.")
 
-    session = boto3.Session(region_name=region)
+    if args.account_id and args.username and args.password:
+        session = AccessController(args.account_id, region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
+    else:
+        session = boto3.Session(region_name=region)
+
     if args.skip_validation:
         print("[WARN] --skip-validation enabled: skipping pre-execution action validation.")
         if db_store is not None and run_id:
