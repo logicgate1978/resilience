@@ -360,7 +360,7 @@ The example columns below show compact service-block snippets so each action sta
   duration: PT5M
   zone: ap-southeast-1a
   tags: environment=development,project=clouddash</code></pre></td></tr>
-    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td>FIS</td><td>Disrupt traffic through selected VPC endpoints.</td><td><code>aws:network:disrupt-vpc-endpoint</code></td><td><pre><code class="language-yaml">- name: network
+    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td>FIS</td><td>Disrupt traffic through selected interface VPC endpoints.</td><td><code>aws:network:disrupt-vpc-endpoint</code></td><td><pre><code class="language-yaml">- name: network
   action: disrupt-vpc-endpoint
   region: ap-southeast-1
   duration: PT5M
@@ -617,7 +617,7 @@ This section is split into:
     <tr><td><code>asg:scale</code></td><td><code>service.tags</code>, <code>service.parameters.max</code></td><td><code>service.parameters.min</code>, <code>service.parameters.desired</code>, <code>service.parameters.wait_for_ready</code>, <code>service.parameters.timeout_seconds</code>, <code>service.start_after</code></td><td><code>min</code> defaults to <code>0</code>; <code>desired</code> defaults to <code>max</code>.</td></tr>
     <tr><th colspan="4" align="left">Network</th></tr>
     <tr><td><code>network:disrupt-connectivity</code></td><td><code>service.duration</code>, <code>service.tags</code></td><td><code>service.zone</code>, <code>service.start_after</code></td><td>If <code>service.zone</code> is present, scope becomes availability-zone.</td></tr>
-    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td><code>service.duration</code> and at least one selector such as <code>service.tags</code> or <code>service.target.vpc_endpoint_id</code></td><td><code>service.target.vpc_endpoint_type</code>, <code>service.target.service_name</code>, <code>service.start_after</code></td><td>Targets interface VPC endpoints through the FIS binding expected by <code>aws:network:disrupt-vpc-endpoint</code>.</td></tr>
+    <tr><td><code>network:disrupt-vpc-endpoint</code></td><td><code>service.duration</code> and at least one selector such as <code>service.tags</code> or <code>service.target.vpc_endpoint_id</code></td><td><code>service.target.vpc_endpoint_type</code>, <code>service.target.service_name</code>, <code>service.start_after</code></td><td>Targets interface VPC endpoints through the FIS binding expected by <code>aws:network:disrupt-vpc-endpoint</code>. <code>service.target.vpc_endpoint_type</code> defaults to <code>Interface</code> and is the only supported value.</td></tr>
     <tr><th colspan="4" align="left">S3</th></tr>
     <tr><td><code>s3:pause-replication</code></td><td><code>service.tags</code>, <code>service.duration</code>, <code>service.destination_region</code></td><td><code>service.destination_buckets</code>, <code>service.prefixes</code>, <code>service.start_after</code></td><td>Narrows paused replication rules by destination bucket and prefix when supplied.</td></tr>
     <tr><td><code>s3:failover</code></td><td>Exactly one of <code>service.target.mrap_name</code>, <code>service.target.mrap_alias</code>, or <code>service.target.mrap_arn</code>, plus <code>service.target.target_region</code></td><td><code>service.region</code>, <code>service.wait_for_ready</code>, <code>service.timeout_seconds</code>, <code>service.start_after</code></td><td><code>service.region</code> defaults to <code>eu-west-1</code>.</td></tr>
@@ -681,7 +681,8 @@ You can bypass these pre-execution checks with the CLI flag `--skip-validation`.
 | `efs` | `efs:failback` | `verify_failback_state` | The source and destination file systems must not already be part of another replication configuration, and the destination must not already be in `REPLICATING` overwrite-protection state. |
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
-| `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. |
+| `network` | `network:disrupt-vpc-endpoint` | `verify_vpc_endpoint_type` | `service.target.vpc_endpoint_type`, when provided, must be `Interface`, which is the only VPC endpoint type supported by the FIS action. |
+| `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. When `service.target.vpc_endpoint_type` is omitted, the framework defaults it to `Interface` during discovery. |
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
 | `rds` | `rds:reboot` | `verify_replica` | Each selected DB instance has Multi-AZ enabled or has at least one read replica. |
 | `rds` | `rds:failover` | `verify_resource_existence` | At least one DB cluster matches the selector. |

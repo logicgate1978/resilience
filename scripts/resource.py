@@ -388,12 +388,13 @@ def collect_service_resource_arns(
         target = svc.get("target") or {}
         if not isinstance(target, dict):
             target = {}
+        vpc_endpoint_type = str(target.get("vpc_endpoint_type") or "").strip() or "Interface"
         return _collect_vpc_endpoints(
             session,
             region,
             tags,
             vpc_endpoint_id=str(target.get("vpc_endpoint_id") or "").strip() or None,
-            vpc_endpoint_type=str(target.get("vpc_endpoint_type") or "").strip() or None,
+            vpc_endpoint_type=vpc_endpoint_type,
             service_name=str(target.get("service_name") or "").strip() or None,
         )
 
