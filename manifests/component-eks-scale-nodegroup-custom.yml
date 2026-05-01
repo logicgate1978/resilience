@@ -4,11 +4,11 @@ services:
 - name: eks
   action: scale-nodegroup
   target:
-    cluster_identifier: resilience-eks-20260328122508
-    nodegroup_name: default-ng
+    cluster_identifier: resilience-eks-20260501142607
+    nodegroup_name: system-ng
   parameters:
-    min: 1
-    max: 2
+    min: 2
+    max: 3
     desired: 2
     wait_for_ready: true
     timeout_seconds: 900
