@@ -42,6 +42,10 @@ actions:
     validations:
       - verify_deployment_existence
       - verify_replicas_value
+  - action: eks:scale-nodegroup
+    validations:
+      - verify_nodegroup_existence
+      - verify_nodegroup_scale_values
   - action: network:disrupt-vpc-endpoint
     validations:
       - verify_vpc_endpoint_type

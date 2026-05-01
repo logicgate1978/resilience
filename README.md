@@ -542,6 +542,25 @@ The example columns below show compact service-block snippets so each action sta
     replicas: 3
     wait_for_ready: true
     timeout_seconds: 600</code></pre></td></tr>
+    <tr><td><code>eks:scale-nodegroup</code></td><td>Custom</td><td>Scale an Amazon EKS managed node group by updating its min, max, and desired size through the EKS API.</td><td></td><td><pre><code class="language-yaml">- name: eks
+  action: scale-nodegroup
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    nodegroup_name: default-ng
+  parameters:
+    max: 2</code></pre></td><td><pre><code class="language-yaml">- name: eks
+  action: scale-nodegroup
+  region: ap-southeast-1
+  target:
+    cluster_identifier: my-eks-cluster
+    nodegroup_name: default-ng
+  parameters:
+    min: 1
+    max: 3
+    desired: 2
+    wait_for_ready: true
+    timeout_seconds: 900</code></pre></td></tr>
   </tbody>
 </table>
 
@@ -631,6 +650,7 @@ This section is split into:
     <tr><td><code>eks:pod-memory-stress</code></td><td><code>service.duration</code>, the same target fields as <code>eks:delete-pod</code>, and a Kubernetes service account value</td><td><code>service.parameters.workers</code>, <code>service.parameters.percent</code>, <code>service.parameters.max_errors_percent</code>, FIS pod overrides, <code>service.start_after</code></td><td>Uses the native FIS pod memory stress action.</td></tr>
     <tr><td><code>eks:terminate-nodegroup-instances</code></td><td><code>service.parameters.instance_termination_percentage</code> and one selector path using either <code>service.tags</code>, <code>service.target.nodegroup_arn</code>, or <code>service.target.nodegroup_arns</code></td><td><code>service.start_after</code></td><td>Targets Amazon EKS managed node groups.</td></tr>
     <tr><td><code>eks:scale-deployment</code></td><td><code>service.target.cluster_identifier</code>, <code>service.target.namespace</code>, <code>service.target.deployment_name</code>, <code>service.parameters.replicas</code></td><td><code>service.region</code>, <code>service.parameters.wait_for_ready</code>, <code>service.parameters.timeout_seconds</code>, <code>service.start_after</code></td><td>Custom action that uses the Kubernetes API, not FIS.</td></tr>
+    <tr><td><code>eks:scale-nodegroup</code></td><td><code>service.target.cluster_identifier</code>, <code>service.target.nodegroup_name</code>, <code>service.parameters.max</code></td><td><code>service.region</code>, <code>service.parameters.min</code>, <code>service.parameters.desired</code>, <code>service.parameters.wait_for_ready</code>, <code>service.parameters.timeout_seconds</code>, <code>service.start_after</code></td><td>Custom action that uses the EKS API to update a managed node group scaling configuration.</td></tr>
   </tbody>
 </table>
 
@@ -681,6 +701,8 @@ You can bypass these pre-execution checks with the CLI flag `--skip-validation`.
 | `efs` | `efs:failback` | `verify_failback_state` | The source and destination file systems must not already be part of another replication configuration, and the destination must not already be in `REPLICATING` overwrite-protection state. |
 | `eks` | `eks:scale-deployment` | `verify_deployment_existence` | `service.target.cluster_identifier`, `namespace`, and `deployment_name` are present, the Kubernetes API is reachable, and the target Deployment exists. |
 | `eks` | `eks:scale-deployment` | `verify_replicas_value` | `service.parameters.replicas` exists, is an integer, and is greater than or equal to zero. |
+| `eks` | `eks:scale-nodegroup` | `verify_nodegroup_existence` | `service.target.cluster_identifier` and `service.target.nodegroup_name` are present, the EKS API is reachable, and the target managed node group exists. |
+| `eks` | `eks:scale-nodegroup` | `verify_nodegroup_scale_values` | `service.parameters.max` exists and is a non-negative integer; `min` and `desired`, when present, are integers within valid bounds; `min <= desired <= max`. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_vpc_endpoint_type` | `service.target.vpc_endpoint_type`, when provided, must be `Interface`, which is the only VPC endpoint type supported by the FIS action. |
 | `network` | `network:disrupt-vpc-endpoint` | `verify_resource_existence` | At least one VPC endpoint matches the selector. When `service.target.vpc_endpoint_type` is omitted, the framework defaults it to `Interface` during discovery. |
 | `rds` | `rds:reboot` | `verify_resource_existence` | At least one DB instance matches the selector. |
@@ -797,6 +819,7 @@ Notes on Aurora Global Database manifests:
 - `use_arc` only applies to Aurora Global Database actions
 - if `use_arc` is omitted, the current default behavior is `true`
 - for `eks:scale-deployment`, use `service.region` plus an explicit `cluster_identifier`
+- for `eks:scale-nodegroup`, use `service.region` plus explicit `cluster_identifier` and `nodegroup_name`
 
 ## ARC Region Switch Design
 
@@ -936,6 +959,7 @@ Current implementation:
 - `dns:set-weight`
 - `asg:scale`
 - `eks:scale-deployment`
+- `eks:scale-nodegroup`
 
 Design rules:
 
@@ -1092,6 +1116,22 @@ Readiness is considered complete when:
 The impacted resource written for this action is a synthetic identifier in this form:
 
 - `eks://<cluster>/<namespace>/deployment/<deployment>`
+
+### Current `eks:scale-nodegroup` Behavior
+
+The custom scaler:
+
+1. reads the managed node group through `DescribeNodegroup`
+2. updates `minSize`, `maxSize`, and `desiredSize` through `UpdateNodegroupConfig`
+3. optionally waits until the node group returns to `ACTIVE` and the scaling configuration matches the requested values
+
+Parameter behavior:
+
+- `max` is required
+- `min` defaults to `0`
+- `desired` defaults to `max`
+
+The impacted resource written for this action is the managed node group ARN returned by the EKS API.
 
 ## Resource Discovery Design
 

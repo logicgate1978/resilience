@@ -77,6 +77,8 @@ def _resource_type_from_arn(arn: str) -> Optional[str]:
         return "efs-file-system"
     if text.startswith("arn:aws:autoscaling:"):
         return "autoscaling-group"
+    if text.startswith("arn:aws:eks:") and ":nodegroup/" in text:
+        return "eks-nodegroup"
     if text.startswith("arn:aws:iam::"):
         return "iam-role"
     if text.startswith("eks://"):

@@ -414,6 +414,8 @@ def _custom_exec_type(item: Dict[str, Any]) -> str:
         return "python sleep"
     if item.get("service") == "eks:scale-deployment":
         return f"scale deployment {target.get('deploymentName') or ''}".strip()
+    if item.get("service") == "eks:scale-nodegroup":
+        return f"scale nodegroup {target.get('nodegroupName') or ''}".strip()
     if item.get("service") == "rds:failover-global-db":
         return "failover_global_cluster"
     if item.get("service") == "rds:switchover-global-db":
