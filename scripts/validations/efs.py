@@ -29,11 +29,11 @@ class EFSValidator(BaseServiceValidator):
     def _resolve_failback_destination(self, context: ValidationContext):
         target = context.service.get("target") or {}
         if not isinstance(target, dict):
-            self.fail(context, "service.target is required for efs:failback.")
+            self.fail(context, f"service.target is required for {context.action_key}.")
 
         destination_region = str(target.get("destination_region") or "").strip()
         if not destination_region:
-            self.fail(context, "service.target.destination_region is required for efs:failback.")
+            self.fail(context, f"service.target.destination_region is required for {context.action_key}.")
         if destination_region == str(context.region or "").strip():
             self.fail(context, "service.target.destination_region must be different from the source region.")
 
@@ -43,7 +43,7 @@ class EFSValidator(BaseServiceValidator):
         if not destination_file_system_id and not destination_tags:
             self.fail(
                 context,
-                "efs:failback requires service.target.destination_file_system_id or service.target.destination_tags.",
+                f"{context.action_key} requires service.target.destination_file_system_id or service.target.destination_tags.",
             )
 
         destination_arns = collect_service_resource_arns(
@@ -120,18 +120,18 @@ class EFSValidator(BaseServiceValidator):
                 f"no resources matched the selection criteria ({context.selection_summary()}).",
             )
         if len(source_arns) != 1:
-            self.fail(context, "efs:failback requires exactly one source EFS file system.")
+            self.fail(context, f"{context.action_key} requires exactly one source EFS file system.")
 
         destination_region, destination_arn = self._resolve_failback_destination(context)
         if destination_arn == source_arns[0]:
             self.fail(context, "source and destination EFS file systems must be different.")
         if not destination_region:
-            self.fail(context, "service.target.destination_region is required for efs:failback.")
+            self.fail(context, f"service.target.destination_region is required for {context.action_key}.")
 
     def verify_failback_state(self, context: ValidationContext) -> None:
         source_arns = context.get_selected_resource_arns()
         if len(source_arns) != 1:
-            self.fail(context, "efs:failback requires exactly one source EFS file system.")
+            self.fail(context, f"{context.action_key} requires exactly one source EFS file system.")
 
         source_file_system_id = _efs_id_from_arn(source_arns[0])
         destination_region, destination_arn = self._resolve_failback_destination(context)
@@ -172,3 +172,30 @@ class EFSValidator(BaseServiceValidator):
                 context,
                 f"destination EFS file system {destination_file_system_id} is already replicating and cannot be reused.",
             )
+
+    def verify_failback_safe_parameters(self, context: ValidationContext) -> None:
+        if context.action != "failback-safe":
+            self.fail(context, f"'verify_failback_safe_parameters' is not supported for action '{context.action}'.")
+
+        params = context.service.get("parameters")
+        if params is None:
+            return
+        if not isinstance(params, dict):
+            self.fail(context, "services[].parameters must be an object when provided.")
+
+        if "final_sync_grace_seconds" in params:
+            try:
+                value = int(params.get("final_sync_grace_seconds"))
+            except Exception:
+                self.fail(context, "services[].parameters.final_sync_grace_seconds must be an integer.")
+                return
+            if value < 0:
+                self.fail(context, "services[].parameters.final_sync_grace_seconds must be >= 0.")
+
+        if "require_quiesce" in params:
+            value = params.get("require_quiesce")
+            if isinstance(value, bool):
+                return
+            text = str(value or "").strip().lower()
+            if text not in ("1", "true", "yes", "y", "on", "0", "false", "no", "n", "off"):
+                self.fail(context, "services[].parameters.require_quiesce must be boolean-like when provided.")

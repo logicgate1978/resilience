@@ -22,6 +22,12 @@ actions:
       - verify_resource_existence
       - verify_failback_target
       - verify_failback_state
+  - action: efs:failback-safe
+    validations:
+      - verify_resource_existence
+      - verify_failback_target
+      - verify_failback_state
+      - verify_failback_safe_parameters
   - action: ec2:terminate
     validations:
       - verify_resource_existence

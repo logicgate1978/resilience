@@ -413,7 +413,7 @@ def collect_service_resource_arns(
     if name == "s3" and action in ("pause-replication", "pause-relication"):
         return _collect_s3_buckets(session, region, tags)
 
-    if name == "efs" and action in ("failover", "failback"):
+    if name == "efs" and action in ("failover", "failback", "failback-safe"):
         return _collect_efs_file_systems(session, region, tags, identifier=identifier or None)
 
     return []

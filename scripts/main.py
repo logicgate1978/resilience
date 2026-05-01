@@ -402,6 +402,8 @@ def _custom_exec_type(item: Dict[str, Any]) -> str:
         return "delete replication config"
     if item.get("service") == "efs:failback":
         return "create reverse replication"
+    if item.get("service") == "efs:failback-safe":
+        return "reverse-sync and restore replication"
     if item.get("service") == "asg:scale":
         return "update ASG capacity"
     if item.get("service") == "dns:set-value":

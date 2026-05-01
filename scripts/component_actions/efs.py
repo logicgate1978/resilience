@@ -56,6 +56,15 @@ def _replication_overwrite_protection(fs: Dict[str, Any]) -> str:
     return str(protection.get("ReplicationOverwriteProtection") or "").strip().upper()
 
 
+def _replication_destination_view(replication: Optional[Dict[str, Any]], destination_file_system_id: str) -> Dict[str, Any]:
+    if not replication:
+        return {}
+    for destination in replication.get("Destinations") or []:
+        if str(destination.get("FileSystemId") or "").strip() == destination_file_system_id:
+            return dict(destination)
+    return {}
+
+
 def _resolve_replication_delete_plan(efs, selected_file_system_ids: List[str]) -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
     replication_by_selected: Dict[str, Dict[str, Any]] = {}
     source_file_system_ids: List[str] = []
@@ -148,6 +157,116 @@ def _find_replication_to_destination(replications: List[Dict[str, Any]], destina
             if str(destination.get("FileSystemId") or "").strip() == destination_file_system_id:
                 return replication
     return None
+
+
+def _wait_for_replication_enabled(
+    *,
+    efs,
+    source_file_system_id: str,
+    destination_file_system_id: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+    timeout_reason: str,
+) -> Dict[str, Any]:
+    import time
+
+    deadline = time.time() + timeout_seconds
+    last_observed: Dict[str, Any] = {}
+    while True:
+        replications = _describe_replications_for_file_system(efs, source_file_system_id)
+        replication = _find_replication_to_destination(replications, destination_file_system_id)
+        last_observed = {
+            "sourceReplications": replications,
+        }
+        if replication is not None:
+            destination = _replication_destination_view(replication, destination_file_system_id)
+            status = str(destination.get("Status") or "").strip().upper()
+            last_observed["replicationStatus"] = status
+            if destination.get("LastReplicatedTimestamp") is not None:
+                last_observed["lastReplicatedTimestamp"] = str(destination.get("LastReplicatedTimestamp"))
+            if status == "ENABLED":
+                return last_observed
+            if status in ("ERROR", "DELETING", "PAUSED", "PAUSING"):
+                raise ValueError(
+                    f"EFS replication entered unexpected status {status or 'UNKNOWN'} while waiting for ENABLED."
+                )
+
+        if time.time() > deadline:
+            raise TimeoutError(timeout_reason + f" Last observed state: {last_observed}")
+        time.sleep(max(1, poll_seconds))
+
+
+def _wait_for_replication_deleted(
+    *,
+    efs,
+    source_file_system_id: str,
+    destination_file_system_id: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+    timeout_reason: str,
+) -> Dict[str, Any]:
+    import time
+
+    deadline = time.time() + timeout_seconds
+    last_observed: Dict[str, Any] = {}
+    while True:
+        replications = _describe_replications_for_file_system(efs, source_file_system_id)
+        replication = _find_replication_to_destination(replications, destination_file_system_id)
+        last_observed = {
+            "sourceReplications": replications,
+        }
+        if replication is None:
+            return last_observed
+
+        if time.time() > deadline:
+            raise TimeoutError(timeout_reason + f" Last observed state: {last_observed}")
+        time.sleep(max(1, poll_seconds))
+
+
+def _prepare_destination_for_replication(
+    *,
+    efs,
+    file_system_id: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    destination_fs = _describe_file_system(efs, file_system_id)
+    protection_state = _replication_overwrite_protection(destination_fs)
+    if protection_state == "REPLICATING":
+        raise ValueError(
+            f"Destination EFS file system {file_system_id} is already replicating and cannot be reused."
+        )
+    if protection_state != "DISABLED":
+        efs.update_file_system_protection(
+            FileSystemId=file_system_id,
+            ReplicationOverwriteProtection="DISABLED",
+        )
+        destination_fs = _wait_for_destination_protection_state(
+            efs=efs,
+            file_system_id=file_system_id,
+            desired_state="DISABLED",
+            poll_seconds=poll_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+    return destination_fs
+
+
+def _create_replication_to_existing_destination(
+    *,
+    efs,
+    source_file_system_id: str,
+    destination_region: str,
+    destination_file_system_id: str,
+) -> None:
+    efs.create_replication_configuration(
+        SourceFileSystemId=source_file_system_id,
+        Destinations=[
+            {
+                "Region": destination_region,
+                "FileSystemId": destination_file_system_id,
+            }
+        ],
+    )
 
 
 class EFSFailoverAction(CustomComponentAction):
@@ -303,7 +422,7 @@ class EFSFailoverAction(CustomComponentAction):
 
 class EFSFailbackAction(CustomComponentAction):
     service_name = "efs"
-    action_names = ["failback"]
+    action_names = ["failback", "failback-safe"]
 
     def build_plan_item(
         self,
@@ -315,6 +434,7 @@ class EFSFailbackAction(CustomComponentAction):
         index: int,
         default_timeout_seconds: int,
     ) -> Dict[str, Any]:
+        action_name = str(svc.get("action") or "").strip().lower()
         arns = collect_service_resource_arns(
             svc,
             session=session,
@@ -322,21 +442,21 @@ class EFSFailbackAction(CustomComponentAction):
             zone=resolve_service_zone(manifest, svc),
         )
         if not arns:
-            raise ValueError("efs:failback did not resolve any source EFS file systems from the manifest selection.")
+            raise ValueError(f"efs:{action_name} did not resolve any source EFS file systems from the manifest selection.")
         if len(arns) != 1:
-            raise ValueError("efs:failback requires exactly one source EFS file system.")
+            raise ValueError(f"efs:{action_name} requires exactly one source EFS file system.")
 
         source_arn = arns[0]
         source_file_system_id = _efs_id_from_arn(source_arn)
         if not source_file_system_id:
-            raise ValueError("efs:failback could not extract the source EFS file system ID from the resolved ARN.")
+            raise ValueError(f"efs:{action_name} could not extract the source EFS file system ID from the resolved ARN.")
 
         target = svc.get("target") or {}
         if not isinstance(target, dict):
-            raise ValueError("efs:failback requires a target block.")
+            raise ValueError(f"efs:{action_name} requires a target block.")
         destination_region = str(target.get("destination_region") or "").strip()
         if not destination_region:
-            raise ValueError("efs:failback requires target.destination_region.")
+            raise ValueError(f"efs:{action_name} requires target.destination_region.")
 
         destination_file_system_id = str(target.get("destination_file_system_id") or "").strip() or None
         destination_tags = parse_tags(target.get("destination_tags"))
@@ -348,17 +468,34 @@ class EFSFailbackAction(CustomComponentAction):
         )
 
         if destination_region == region and destination_resolved_id == source_file_system_id:
-            raise ValueError("efs:failback source and destination cannot be the same EFS file system.")
+            raise ValueError(f"efs:{action_name} source and destination cannot be the same EFS file system.")
 
         wait_for_ready = _optional_bool(svc.get("wait_for_ready"), True)
         timeout_seconds = int(svc.get("timeout_seconds") or default_timeout_seconds)
+        final_sync_grace_seconds = 120
+        require_quiesce = False
+        if action_name == "failback-safe":
+            params_cfg = svc.get("parameters") or {}
+            if not isinstance(params_cfg, dict):
+                raise ValueError("efs:failback-safe requires services[].parameters to be an object when provided.")
+            require_quiesce = _optional_bool(params_cfg.get("require_quiesce"), True)
+            try:
+                final_sync_grace_seconds = int(params_cfg.get("final_sync_grace_seconds") or 120)
+            except Exception:
+                raise ValueError("efs:failback-safe requires integer services[].parameters.final_sync_grace_seconds.")
+            if final_sync_grace_seconds < 0:
+                raise ValueError("efs:failback-safe requires non-negative services[].parameters.final_sync_grace_seconds.")
 
         return {
-            "name": f"a_efs_failback_{index}",
+            "name": f"a_efs_{action_name}_{index}",
             "engine": "custom",
-            "service": f"{normalize_service_name(svc.get('name'))}:failback",
-            "action": "failback",
-            "description": "Create reverse EFS replication back to the destination file system",
+            "service": f"{normalize_service_name(svc.get('name'))}:{action_name}",
+            "action": action_name,
+            "description": (
+                "Create reverse EFS replication back to the destination file system"
+                if action_name == "failback"
+                else "Perform safe EFS failback by reverse-syncing data and restoring forward replication"
+            ),
             "target": {
                 "sourceFileSystemId": source_file_system_id,
                 "sourceArn": source_arn,
@@ -369,15 +506,17 @@ class EFSFailbackAction(CustomComponentAction):
             "parameters": {
                 "waitForReady": wait_for_ready,
                 "timeoutSeconds": timeout_seconds,
+                "requireQuiesce": require_quiesce,
+                "finalSyncGraceSeconds": final_sync_grace_seconds,
             },
             "impacted_resources": [
                 {
-                    "service": "efs:failback",
+                    "service": f"efs:{action_name}",
                     "arn": source_arn,
                     "selection_mode": "CUSTOM",
                 },
                 {
-                    "service": "efs:failback",
+                    "service": f"efs:{action_name}",
                     "arn": destination_arn,
                     "selection_mode": "CUSTOM",
                 },
@@ -402,6 +541,7 @@ class EFSFailbackAction(CustomComponentAction):
         destination_file_system_id = str(target.get("destinationFileSystemId") or "").strip()
         wait_for_ready = bool(params.get("waitForReady"))
         effective_timeout_seconds = int(params.get("timeoutSeconds") or timeout_seconds)
+        action_name = str(item.get("action") or "").strip().lower()
 
         source_region = str(item.get("region") or "").strip()
         source_efs = session.client("efs", region_name=source_region)
@@ -421,40 +561,25 @@ class EFSFailbackAction(CustomComponentAction):
                     f"Destination EFS file system {destination_file_system_id} is already part of a replication configuration."
                 )
 
-            destination_fs = _describe_file_system(destination_efs, destination_file_system_id)
-            protection_state = _replication_overwrite_protection(destination_fs)
-            if protection_state == "REPLICATING":
-                raise ValueError(
-                    f"Destination EFS file system {destination_file_system_id} is already replicating and cannot be reused."
-                )
-            if protection_state != "DISABLED":
-                destination_efs.update_file_system_protection(
-                    FileSystemId=destination_file_system_id,
-                    ReplicationOverwriteProtection="DISABLED",
-                )
-                destination_fs = _wait_for_destination_protection_state(
-                    efs=destination_efs,
-                    file_system_id=destination_file_system_id,
-                    desired_state="DISABLED",
-                    poll_seconds=poll_seconds,
-                    timeout_seconds=effective_timeout_seconds,
-                )
+            _prepare_destination_for_replication(
+                efs=destination_efs,
+                file_system_id=destination_file_system_id,
+                poll_seconds=poll_seconds,
+                timeout_seconds=effective_timeout_seconds,
+            )
 
-            source_efs.create_replication_configuration(
-                SourceFileSystemId=source_file_system_id,
-                Destinations=[
-                    {
-                        "Region": destination_region,
-                        "FileSystemId": destination_file_system_id,
-                    }
-                ],
+            _create_replication_to_existing_destination(
+                efs=source_efs,
+                source_file_system_id=source_file_system_id,
+                destination_region=destination_region,
+                destination_file_system_id=destination_file_system_id,
             )
         except Exception as e:
             ended_at = _utc_now_iso()
             return {
                 "name": item["name"],
                 "status": "failed",
-                "reason": f"EFS API error during efs:failback: {e}",
+                "reason": f"EFS API error during efs:{action_name}: {e}",
                 "startTime": started_at,
                 "endTime": ended_at,
                 "details": {
@@ -463,49 +588,97 @@ class EFSFailbackAction(CustomComponentAction):
                 },
             }
 
-        if wait_for_ready:
-            deadline = time.time() + effective_timeout_seconds
-            while True:
-                replications = _describe_replications_for_file_system(source_efs, source_file_system_id)
-                replication = _find_replication_to_destination(replications, destination_file_system_id)
-                last_observed = {
-                    "sourceReplications": replications,
-                }
-                if replication is not None:
-                    status = str(replication.get("Status") or "").strip().upper()
-                    last_observed["replicationStatus"] = status
-                    if status == "ENABLED":
-                        break
-                    if status in ("ERROR", "DELETING"):
-                        ended_at = _utc_now_iso()
-                        return {
-                            "name": item["name"],
-                            "status": "failed",
-                            "reason": f"EFS replication entered unexpected status {status or 'UNKNOWN'} during failback.",
-                            "startTime": started_at,
-                            "endTime": ended_at,
-                            "details": {
-                                "target": target,
-                                "parameters": params,
-                                "lastObservedReplicationState": last_observed,
-                            },
-                        }
+        try:
+            if wait_for_ready or action_name == "failback-safe":
+                last_observed = _wait_for_replication_enabled(
+                    efs=source_efs,
+                    source_file_system_id=source_file_system_id,
+                    destination_file_system_id=destination_file_system_id,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=effective_timeout_seconds,
+                    timeout_reason=(
+                        "Timed out waiting for the EFS failback replication configuration to become ENABLED."
+                        if action_name == "failback"
+                        else "Timed out waiting for the reverse EFS replication configuration to become ENABLED."
+                    ),
+                )
 
-                if time.time() > deadline:
-                    ended_at = _utc_now_iso()
-                    return {
-                        "name": item["name"],
-                        "status": "failed",
-                        "reason": "Timed out waiting for the EFS failback replication configuration to become ENABLED.",
-                        "startTime": started_at,
-                        "endTime": ended_at,
-                        "details": {
-                            "target": target,
-                            "parameters": params,
-                            "lastObservedReplicationState": last_observed,
-                        },
-                    }
-                time.sleep(max(1, poll_seconds))
+            if action_name == "failback-safe":
+                import time
+
+                if not last_observed:
+                    last_observed = _wait_for_replication_enabled(
+                        efs=source_efs,
+                        source_file_system_id=source_file_system_id,
+                        destination_file_system_id=destination_file_system_id,
+                        poll_seconds=poll_seconds,
+                        timeout_seconds=effective_timeout_seconds,
+                        timeout_reason="Timed out waiting for the reverse EFS replication configuration to become ENABLED.",
+                    )
+                reverse_last_sync = last_observed.get("lastReplicatedTimestamp")
+                require_quiesce = bool(params.get("requireQuiesce"))
+                final_sync_grace_seconds = int(params.get("finalSyncGraceSeconds") or 0)
+                if require_quiesce:
+                    print(
+                        "[WARN] efs:failback-safe assumes application writes have been quiesced on the current source before final cutback.",
+                        flush=True,
+                    )
+                if final_sync_grace_seconds > 0:
+                    print(
+                        f"[INFO] efs:failback-safe waiting final sync grace window: {final_sync_grace_seconds}s",
+                        flush=True,
+                    )
+                    time.sleep(final_sync_grace_seconds)
+
+                source_efs.delete_replication_configuration(SourceFileSystemId=source_file_system_id)
+                last_observed["reverseReplicationBeforeDelete"] = {
+                    "lastReplicatedTimestamp": reverse_last_sync,
+                    "finalSyncGraceSeconds": final_sync_grace_seconds,
+                    "requireQuiesce": require_quiesce,
+                }
+                last_observed["reverseReplicationDeleteState"] = _wait_for_replication_deleted(
+                    efs=source_efs,
+                    source_file_system_id=source_file_system_id,
+                    destination_file_system_id=destination_file_system_id,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=effective_timeout_seconds,
+                    timeout_reason="Timed out waiting for the reverse EFS replication configuration to be deleted.",
+                )
+
+                _prepare_destination_for_replication(
+                    efs=source_efs,
+                    file_system_id=source_file_system_id,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=effective_timeout_seconds,
+                )
+                _create_replication_to_existing_destination(
+                    efs=destination_efs,
+                    source_file_system_id=destination_file_system_id,
+                    destination_region=source_region,
+                    destination_file_system_id=source_file_system_id,
+                )
+                last_observed["forwardReplicationState"] = _wait_for_replication_enabled(
+                    efs=destination_efs,
+                    source_file_system_id=destination_file_system_id,
+                    destination_file_system_id=source_file_system_id,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=effective_timeout_seconds,
+                    timeout_reason="Timed out waiting for the restored forward EFS replication configuration to become ENABLED.",
+                )
+        except Exception as e:
+            ended_at = _utc_now_iso()
+            return {
+                "name": item["name"],
+                "status": "failed",
+                "reason": f"EFS API error during efs:{action_name}: {e}",
+                "startTime": started_at,
+                "endTime": ended_at,
+                "details": {
+                    "target": target,
+                    "parameters": params,
+                    "lastObservedReplicationState": last_observed,
+                },
+            }
 
         ended_at = _utc_now_iso()
         return {
