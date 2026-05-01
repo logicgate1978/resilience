@@ -1,0 +1,14 @@
+region: ap-southeast-1
+
+services:
+- name: eks
+  action: scale-nodegroup
+  target:
+    cluster_identifier: resilience-eks-20260501142607
+    nodegroup_name: system-ng
+  parameters:
+    min: 0
+    max: 0
+    desired: 0
+    wait_for_ready: true
+    timeout_seconds: 900
