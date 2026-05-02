@@ -22,6 +22,11 @@ from region_switch import (
     resolve_region_targets,
     validate_region_manifest,
 )
+from rollback import (
+    build_rollback_dry_run_rows,
+    build_rollback_execution_plan,
+    execute_rollback_plan,
+)
 from resource import collect_impacted_resources
 from utility import (
     coerce_bool,
@@ -180,6 +185,20 @@ def summarize_experiment(exp: Dict[str, Any]) -> Dict[str, Any]:
 def _get_report_filename(base_name: str) -> str:
     report_date = datetime.utcnow().strftime("%Y%m%d")
     return f"report_{base_name}_{report_date}.html"
+
+
+def _create_runtime_session(args, region: Optional[str]):
+    if args.account_id and args.username and args.password:
+        return AccessController(args.account_id, region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
+    return boto3.Session(region_name=region)
+
+
+def _default_rollback_session_region(execution_plan: Dict[str, Any]) -> str:
+    for item in execution_plan.get("items") or []:
+        region = str(item.get("region") or "").strip()
+        if region and region != "-":
+            return region
+    return os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
 
 
 def _db_safe_call(fn, *args, **kwargs):
@@ -616,23 +635,86 @@ def main() -> int:
     ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", None), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
     ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--db-dsn", default=_env_value(env_defaults, "DB_DSN", _env_value(env_defaults, "DATABASE_URL", "")), help="Optional PostgreSQL DSN for persisting run metadata and artifacts")
+    ap.add_argument("--rollback-run-id", default="", help="Rollback a previous run by run_id using stored rollback metadata in PostgreSQL")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--skip-validation", action="store_true", help="Skip pre-execution action validation and continue directly to planning/execution")
     ap.add_argument("--poll-seconds", type=int, default=_env_int(env_defaults, "POLL_SECONDS", 10), help="Polling interval while waiting for experiment")
     ap.add_argument("--timeout-seconds", type=int, default=_env_int(env_defaults, "TIMEOUT_SECONDS", 7200), help="Timeout per experiment in seconds")
     ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
+    ensure_dir(args.outdir)
+    if str(args.db_dsn or "").strip():
+        log_message("INFO", f"Database persistence requested: {_mask_db_dsn(args.db_dsn)}")
+    else:
+        log_message("INFO", "Database persistence disabled: no DB_DSN / DATABASE_URL / --db-dsn provided.")
+    db_store = _db_safe_call(PostgresRunStore.from_dsn, args.db_dsn)
+    rollback_run_id = str(args.rollback_run_id or "").strip()
+
+    if rollback_run_id:
+        if db_store is None:
+            raise ValueError("--rollback-run-id requires --db-dsn or DB_DSN / DATABASE_URL so rollback metadata can be loaded.")
+        if args.skip_validation:
+            log_message("WARN", "--skip-validation has no effect for rollback execution and will be ignored.")
+
+        rollback_rows = _db_safe_call(db_store.fetch_rollback_actions, rollback_run_id) or []
+        if not rollback_rows:
+            raise ValueError(
+                f"No rollback-supported completed actions were found for run_id {rollback_run_id}."
+            )
+
+        rollback_plan = build_rollback_execution_plan(
+            rollback_rows,
+            default_timeout_seconds=args.timeout_seconds,
+        )
+        session = _create_runtime_session(args, _default_rollback_session_region(rollback_plan))
+        summary_name = rollback_plan["name"]
+
+        if args.dry_run:
+            dry_run_rows = build_rollback_dry_run_rows(rollback_plan)
+            dry_run_text = _build_dry_run_summary_text(
+                manifest_path=f"rollback:{rollback_run_id}",
+                engine_family="rollback",
+                rows=dry_run_rows,
+            )
+            dry_run_summary_path = _write_dry_run_summary(
+                outdir=args.outdir,
+                name=summary_name,
+                text=dry_run_text,
+            )
+            print(dry_run_text, flush=True)
+            log_message("OK", f"Wrote dry-run approval summary: {dry_run_summary_path}")
+            log_message("INFO", "Dry-run enabled: skipping rollback execution.")
+            return 0
+
+        summary = execute_rollback_plan(
+            session=session,
+            execution_plan=rollback_plan,
+            poll_seconds=args.poll_seconds,
+            timeout_seconds=args.timeout_seconds,
+            status_updater=(
+                lambda action_id, status, reason, rolled_back: _db_safe_call(
+                    db_store.update_rollback_result,
+                    action_id,
+                    status=status,
+                    reason=reason,
+                    rolled_back=rolled_back,
+                )
+            ),
+        )
+
+        result_path = os.path.join(args.outdir, f"rollback_result_{summary_name}.json")
+        with open(result_path, "w", encoding="utf-8") as f:
+            f.write(pretty(summary))
+        log_message("OK", f"Wrote rollback result summary JSON: {result_path}")
+        print("[RESULT] Rollback Summary:", flush=True)
+        print(pretty(summary), flush=True)
+        return 0 if str(summary.get("status") or "").lower() == "completed" else 1
 
     manifest = load_manifest(args.manifest)
     engine_family = _resolve_manifest_engine_family(manifest)
     artifact_entries: List[Dict[str, Any]] = [
         _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest)
     ]
-    if str(args.db_dsn or "").strip():
-        log_message("INFO", f"Database persistence requested: {_mask_db_dsn(args.db_dsn)}")
-    else:
-        log_message("INFO", "Database persistence disabled: no DB_DSN / DATABASE_URL / --db-dsn provided.")
-    db_store = _db_safe_call(PostgresRunStore.from_dsn, args.db_dsn)
     run_id = None
     if db_store is not None:
         log_message("INFO", "Database persistence enabled: creating run record.")
@@ -649,8 +731,6 @@ def main() -> int:
             log_message("OK", f"Created DB run record: {run_id}")
         else:
             log_message("WARN", "Database persistence is enabled but the initial run record was not created.")
-
-    ensure_dir(args.outdir)
 
     if engine_family == "arc":
         if args.skip_validation:
@@ -690,10 +770,7 @@ def main() -> int:
                 return 1
         control_region = _default_session_region(manifest, engine_family)
 
-        if args.account_id and args.username and args.password:
-            session = AccessController(args.account_id, control_region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
-        else:
-            session = boto3.Session(region_name=control_region)
+        session = _create_runtime_session(args, control_region)
 
         resolved_targets = resolve_region_targets(manifest, session)
         impacted_resources = collect_impacted_resources(
@@ -910,10 +987,7 @@ def main() -> int:
     if not region and engine_family == "fis":
         raise ValueError("FIS actions require region at the top level or service level.")
 
-    if args.account_id and args.username and args.password:
-        session = AccessController(args.account_id, region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
-    else:
-        session = boto3.Session(region_name=region)
+    session = _create_runtime_session(args, region)
 
     if args.skip_validation:
         log_message("WARN", "--skip-validation enabled: skipping pre-execution action validation.")

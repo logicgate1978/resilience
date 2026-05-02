@@ -116,6 +116,8 @@ Current phase 1 rollback metadata capture covers:
 - `dns:set-weight`
 - `s3:failover`
 
+Phase 2 rollback execution is now available for the same action set through `--rollback-run-id`.
+
 ### Custom Component Actions
 
 - `scripts/component_actions/__init__.py`
@@ -1626,6 +1628,38 @@ Dry run also prints an approver-friendly ASCII table that summarizes:
 - key action parameters, excluding framework-only readiness and timeout controls
 
 The same table is written to `outdir` as `dry_run_approval_summary_<name>.txt`.
+
+### Rollback a Previous Run
+
+Rollback currently supports the phase 1 rollback-capable action set:
+
+- `asg:scale`
+- `eks:scale-deployment`
+- `eks:scale-nodegroup`
+- `dns:set-value`
+- `dns:set-weight`
+- `s3:failover`
+
+Rollback requires PostgreSQL persistence because it reads the stored `before_state_json` and `rollback_plan_json` from `resilience.rollback_state`.
+
+Dry-run the rollback plan for a previous run:
+
+```powershell
+python main.py --rollback-run-id <run_id> --dry-run
+```
+
+Execute the rollback:
+
+```powershell
+python main.py --rollback-run-id <run_id>
+```
+
+Current behavior:
+
+- rollback actions are executed in reverse action order from the original run
+- rollback writes `rollback_result_<name>.json` to `outdir`
+- rollback updates `resilience.rollback_state.rollback_status`, `rollback_reason`, and `rolled_back_at`
+- if one rollback action fails, the remaining rollback actions are marked as skipped
 
 ### Runtime Logging
 

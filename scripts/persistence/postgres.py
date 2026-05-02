@@ -535,6 +535,67 @@ class PostgresRunStore:
                     (run_id, validation_name, status, message),
                 )
 
+    def fetch_rollback_actions(self, run_id: str) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    rs.run_id,
+                    ta.action_id,
+                    ta.sequence_no,
+                    ta.action_ref,
+                    ta.service_name,
+                    ta.action_name,
+                    ta.requested_region,
+                    ta.requested_zone,
+                    ta.status,
+                    rs.rollback_mode,
+                    rs.rollback_supported,
+                    rs.before_state_json,
+                    rs.after_state_json,
+                    rs.rollback_plan_json,
+                    rs.rollback_status,
+                    rs.rollback_reason,
+                    rs.rolled_back_at
+                FROM resilience.rollback_state rs
+                JOIN resilience.test_action ta
+                  ON ta.action_id = rs.action_id
+                WHERE rs.run_id = %s
+                  AND rs.rollback_supported = TRUE
+                  AND ta.status = 'completed'
+                ORDER BY ta.sequence_no DESC, ta.action_id DESC
+                """,
+                (run_id,),
+            )
+            columns = [desc[0] for desc in cur.description or []]
+            for row in cur.fetchall():
+                item = dict(zip(columns, row))
+                rows.append(item)
+        return rows
+
+    def update_rollback_result(
+        self,
+        action_id: str,
+        *,
+        status: str,
+        reason: Optional[str] = None,
+        rolled_back: bool = False,
+    ) -> None:
+        rolled_back_at = _utc_now() if rolled_back and status == "completed" else None
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE resilience.rollback_state
+                SET rollback_status = %s,
+                    rollback_reason = %s,
+                    rolled_back_at = CASE WHEN %s IS NOT NULL THEN %s ELSE rolled_back_at END,
+                    updated_at = NOW()
+                WHERE action_id = %s
+                """,
+                (status, reason, rolled_back_at, rolled_back_at, action_id),
+            )
+
     def replace_actions(
         self,
         run_id: str,
