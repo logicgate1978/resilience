@@ -95,6 +95,7 @@ Responsibilities:
 - `scripts/persistence/__init__.py`
 - `scripts/persistence/postgres.py`
 - `db/001_init_resilience_schema.sql`
+- `db/002_add_rollback_state.sql`
 - `db/README.md`
 
 Responsibilities:
@@ -103,7 +104,17 @@ Responsibilities:
 - persist action plans and final action outcomes
 - persist impacted resources and generated artifacts
 - persist validation outcomes and observability metric samples
+- capture per-action rollback metadata for supported actions
 - keep database persistence best-effort so a DB outage does not block the resilience test run
+
+Current phase 1 rollback metadata capture covers:
+
+- `asg:scale`
+- `eks:scale-deployment`
+- `eks:scale-nodegroup`
+- `dns:set-value`
+- `dns:set-weight`
+- `s3:failover`
 
 ### Custom Component Actions
 

@@ -7,14 +7,18 @@ This directory contains the PostgreSQL schema bootstrap for storing resilience t
 - `001_init_resilience_schema.sql`
   - creates the `resilience` schema
   - creates the enum types used by the run model
-  - creates the six core tables:
+  - creates the seven core tables:
     - `test_run`
     - `test_action`
     - `impacted_resource`
     - `execution_artifact`
     - `validation_result`
     - `metric_series`
+    - `rollback_state`
   - creates the recommended indexes for common lookups
+- `002_add_rollback_state.sql`
+  - additive migration for existing databases that were created before rollback metadata capture was introduced
+  - creates the `rollback_state` table and its indexes if they do not already exist
 
 ## Data Model Summary
 
@@ -32,6 +36,15 @@ The schema is built around one top-level run row in `resilience.test_run`.
   - optional validation outcomes when validation is enabled
 - `metric_series`
   - optional CloudWatch or health-check time-series samples
+- `rollback_state`
+  - per-action rollback metadata such as `before_state_json`, `after_state_json`, and `rollback_plan_json`
+  - phase 1 currently captures rollback metadata for:
+    - `asg:scale`
+    - `eks:scale-deployment`
+    - `eks:scale-nodegroup`
+    - `dns:set-value`
+    - `dns:set-weight`
+    - `s3:failover`
 
 The design intentionally keeps artifact storage flexible:
 
@@ -45,6 +58,12 @@ Example:
 
 ```powershell
 psql "host=<host> dbname=<db> user=<user> password=<password> sslmode=require" -f db/001_init_resilience_schema.sql
+```
+
+If your database already has the original schema applied, run the additive migration too:
+
+```powershell
+psql "host=<host> dbname=<db> user=<user> password=<password> sslmode=require" -f db/002_add_rollback_state.sql
 ```
 
 ## Notes

@@ -144,6 +144,214 @@ def _service_occurrence_refs(manifest: Dict[str, Any]) -> Dict[int, str]:
     return refs
 
 
+def _supported_rollback_mode(service_name: str, action_name: str) -> Optional[str]:
+    action_key = f"{service_name}:{action_name}"
+    if action_key in {
+        "asg:scale",
+        "eks:scale-deployment",
+        "eks:scale-nodegroup",
+        "dns:set-value",
+        "dns:set-weight",
+        "s3:failover",
+    }:
+        return "automatic"
+    return None
+
+
+def _map_custom_summary_items(summary: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    out: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(summary, dict):
+        return out
+    items = (((summary.get("customExecution") or {}).get("items")) or [])
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            out[name] = item
+    return out
+
+
+def _normalize_group_sizes(group_map: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not isinstance(group_map, dict):
+        return out
+    for group_name, values in sorted(group_map.items()):
+        if not isinstance(values, dict):
+            continue
+        out.append(
+            {
+                "groupName": group_name,
+                "min": values.get("min"),
+                "max": values.get("max"),
+                "desired": values.get("desired"),
+            }
+        )
+    return out
+
+
+def _extract_rollback_state(
+    *,
+    service_name: str,
+    action_name: str,
+    requested_region: Optional[str],
+    plan_item: Optional[Dict[str, Any]],
+    result_json: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    rollback_mode = _supported_rollback_mode(service_name, action_name)
+    if rollback_mode is None:
+        return None
+
+    item = plan_item or {}
+    result = result_json or {}
+    details = result.get("details") or {}
+    action_key = f"{service_name}:{action_name}"
+
+    if action_key == "asg:scale":
+        before_groups = _normalize_group_sizes(details.get("originalSizes") or {})
+        after_groups = _normalize_group_sizes((details.get("finalStatus") or {})) if isinstance(details.get("finalStatus"), dict) else []
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": bool(before_groups),
+            "before_state_json": {"groups": before_groups} if before_groups else None,
+            "after_state_json": {"groups": after_groups} if after_groups else None,
+            "rollback_plan_json": {
+                "service": action_key,
+                "region": requested_region,
+                "groups": before_groups,
+            } if before_groups else None,
+        }
+
+    if action_key == "eks:scale-deployment":
+        target = item.get("target") or {}
+        original_replicas = details.get("originalReplicas")
+        if original_replicas is None:
+            return {
+                "rollback_mode": rollback_mode,
+                "rollback_supported": False,
+                "before_state_json": None,
+                "after_state_json": None,
+                "rollback_plan_json": None,
+            }
+        before_state = {
+            "clusterIdentifier": target.get("clusterIdentifier"),
+            "namespace": target.get("namespace"),
+            "deploymentName": target.get("deploymentName"),
+            "replicas": original_replicas,
+        }
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": True,
+            "before_state_json": before_state,
+            "after_state_json": details.get("finalStatus"),
+            "rollback_plan_json": {
+                "service": action_key,
+                "region": requested_region,
+                "target": {
+                    "cluster_identifier": target.get("clusterIdentifier"),
+                    "namespace": target.get("namespace"),
+                    "deployment_name": target.get("deploymentName"),
+                },
+                "parameters": {
+                    "replicas": original_replicas,
+                },
+            },
+        }
+
+    if action_key == "eks:scale-nodegroup":
+        target = item.get("target") or {}
+        original_scaling = details.get("originalScaling")
+        if not isinstance(original_scaling, dict):
+            return {
+                "rollback_mode": rollback_mode,
+                "rollback_supported": False,
+                "before_state_json": None,
+                "after_state_json": None,
+                "rollback_plan_json": None,
+            }
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": True,
+            "before_state_json": original_scaling,
+            "after_state_json": details.get("finalStatus"),
+            "rollback_plan_json": {
+                "service": action_key,
+                "region": requested_region,
+                "target": {
+                    "cluster_identifier": target.get("clusterIdentifier"),
+                    "nodegroup_name": target.get("nodegroupName"),
+                },
+                "parameters": {
+                    "min": original_scaling.get("min"),
+                    "max": original_scaling.get("max"),
+                    "desired": original_scaling.get("desired"),
+                },
+            },
+        }
+
+    if action_key == "dns:set-value":
+        before_rrset = item.get("recordSetBefore")
+        after_rrset = item.get("recordSetAfter")
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": bool(before_rrset),
+            "before_state_json": {"recordSet": before_rrset} if before_rrset else None,
+            "after_state_json": {"recordSet": after_rrset} if after_rrset else None,
+            "rollback_plan_json": {
+                "service": action_key,
+                "hostedZoneId": (item.get("target") or {}).get("hostedZoneId"),
+                "recordSet": before_rrset,
+            } if before_rrset else None,
+        }
+
+    if action_key == "dns:set-weight":
+        record_sets = item.get("recordSets") or []
+        before_sets = [
+            {"setIdentifier": entry.get("setIdentifier"), "recordSet": entry.get("before")}
+            for entry in record_sets
+            if isinstance(entry, dict) and entry.get("before")
+        ]
+        after_sets = [
+            {"setIdentifier": entry.get("setIdentifier"), "recordSet": entry.get("after")}
+            for entry in record_sets
+            if isinstance(entry, dict) and entry.get("after")
+        ]
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": bool(before_sets),
+            "before_state_json": {"recordSets": before_sets} if before_sets else None,
+            "after_state_json": {"recordSets": after_sets} if after_sets else None,
+            "rollback_plan_json": {
+                "service": action_key,
+                "hostedZoneId": (item.get("target") or {}).get("hostedZoneId"),
+                "recordSets": [entry.get("recordSet") for entry in before_sets],
+            } if before_sets else None,
+        }
+
+    if action_key == "s3:failover":
+        routes_before = item.get("routesBefore")
+        routes_after = details.get("routesAfter") or item.get("routeUpdates")
+        return {
+            "rollback_mode": rollback_mode,
+            "rollback_supported": bool(routes_before),
+            "before_state_json": {
+                "activeRegion": item.get("activeRegionBefore"),
+                "routes": routes_before,
+            } if routes_before else None,
+            "after_state_json": {
+                "routes": routes_after,
+            } if routes_after else None,
+            "rollback_plan_json": {
+                "service": action_key,
+                "region": (item.get("target") or {}).get("controlRegion"),
+                "mrapArn": (item.get("target") or {}).get("mrapArn"),
+                "routeUpdates": routes_before,
+            } if routes_before else None,
+        }
+
+    return None
+
+
 class PostgresRunStore:
     def __init__(self, dsn: str):
         try:
@@ -327,6 +535,7 @@ class PostgresRunStore:
         services = [svc for svc in (manifest.get("services") or []) if isinstance(svc, dict)]
         refs = _service_occurrence_refs(manifest)
         summary_actions = (summary or {}).get("actions") or {}
+        custom_summary_items = _map_custom_summary_items(summary)
         plan_items = list((execution_plan or {}).get("items") or [])
         payload_actions = (fis_payload or {}).get("actions") or {}
         payload_targets = (fis_payload or {}).get("targets") or {}
@@ -343,6 +552,7 @@ class PostgresRunStore:
                 exec_name = f"a_{service_name}_{action_name}_{index}"
                 execution_target_json: Dict[str, Any] = {}
                 action_summary = summary_actions.get(exec_name)
+                item: Optional[Dict[str, Any]] = None
 
                 if fis_payload:
                     action_obj = payload_actions.get(exec_name) or {}
@@ -357,13 +567,8 @@ class PostgresRunStore:
                 elif index <= len(plan_items):
                     item = plan_items[index - 1]
                     exec_name = str(item.get("name") or exec_name)
-                    action_summary = summary_actions.get(exec_name)
-                    execution_target_json = {
-                        "executionName": exec_name,
-                        "target": item.get("target"),
-                        "parameters": item.get("parameters"),
-                        "startAfter": item.get("startAfter"),
-                    }
+                    action_summary = custom_summary_items.get(exec_name) or summary_actions.get(exec_name)
+                    execution_target_json = dict(item)
 
                 if action_summary:
                     status = _status_for_db(action_summary.get("status"))
@@ -407,6 +612,7 @@ class PostgresRunStore:
                     VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
+                    RETURNING action_id
                     """,
                     (
                         run_id,
@@ -427,6 +633,44 @@ class PostgresRunStore:
                         self._Jsonb(result_json) if result_json is not None else None,
                     ),
                 )
+                action_row = cur.fetchone()
+                action_id = str(action_row[0]) if action_row else None
+
+                rollback_state = _extract_rollback_state(
+                    service_name=service_name,
+                    action_name=action_name,
+                    requested_region=requested_region,
+                    plan_item=item,
+                    result_json=result_json,
+                )
+                if action_id and rollback_state is not None:
+                    cur.execute(
+                        """
+                        INSERT INTO resilience.rollback_state (
+                            run_id,
+                            action_id,
+                            rollback_mode,
+                            rollback_supported,
+                            before_state_json,
+                            after_state_json,
+                            rollback_plan_json,
+                            rollback_status,
+                            rollback_reason
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            run_id,
+                            action_id,
+                            rollback_state.get("rollback_mode"),
+                            bool(rollback_state.get("rollback_supported")),
+                            self._Jsonb(rollback_state.get("before_state_json")) if rollback_state.get("before_state_json") is not None else None,
+                            self._Jsonb(rollback_state.get("after_state_json")) if rollback_state.get("after_state_json") is not None else None,
+                            self._Jsonb(rollback_state.get("rollback_plan_json")) if rollback_state.get("rollback_plan_json") is not None else None,
+                            None,
+                            None,
+                        ),
+                    )
 
     def replace_impacted_resources(self, run_id: str, impacted_resources: List[Dict[str, Any]]) -> None:
         with self._connect() as conn, conn.cursor() as cur:
