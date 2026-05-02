@@ -4,7 +4,7 @@ import hashlib
 import os
 import socket
 import subprocess
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
@@ -37,6 +37,20 @@ def _sha256_file(path: str) -> Optional[str]:
                 break
             h.update(chunk)
     return h.hexdigest()
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, set):
+        return [_json_safe(v) for v in sorted(value, key=lambda x: str(x))]
+    return value
 
 
 def _status_for_db(value: Optional[str], *, dry_run: bool = False) -> str:
@@ -439,10 +453,10 @@ class PostgresRunStore:
                     manifest_path,
                     manifest_sha256,
                     manifest_yaml,
-                    self._Jsonb(manifest),
+                    self._Jsonb(_json_safe(manifest)),
                     dry_run,
                     skip_validation,
-                    self._Jsonb(_build_region_context(manifest)),
+                    self._Jsonb(_json_safe(_build_region_context(manifest))),
                     initiated_by,
                     socket.gethostname(),
                     None,
@@ -628,9 +642,9 @@ class PostgresRunStore:
                         reason,
                         started_at,
                         ended_at,
-                        self._Jsonb(svc),
-                        self._Jsonb(execution_target_json or {}),
-                        self._Jsonb(result_json) if result_json is not None else None,
+                        self._Jsonb(_json_safe(svc)),
+                        self._Jsonb(_json_safe(execution_target_json or {})),
+                        self._Jsonb(_json_safe(result_json)) if result_json is not None else None,
                     ),
                 )
                 action_row = cur.fetchone()
@@ -664,9 +678,9 @@ class PostgresRunStore:
                             action_id,
                             rollback_state.get("rollback_mode"),
                             bool(rollback_state.get("rollback_supported")),
-                            self._Jsonb(rollback_state.get("before_state_json")) if rollback_state.get("before_state_json") is not None else None,
-                            self._Jsonb(rollback_state.get("after_state_json")) if rollback_state.get("after_state_json") is not None else None,
-                            self._Jsonb(rollback_state.get("rollback_plan_json")) if rollback_state.get("rollback_plan_json") is not None else None,
+                            self._Jsonb(_json_safe(rollback_state.get("before_state_json"))) if rollback_state.get("before_state_json") is not None else None,
+                            self._Jsonb(_json_safe(rollback_state.get("after_state_json"))) if rollback_state.get("after_state_json") is not None else None,
+                            self._Jsonb(_json_safe(rollback_state.get("rollback_plan_json"))) if rollback_state.get("rollback_plan_json") is not None else None,
                             None,
                             None,
                         ),
@@ -701,7 +715,7 @@ class PostgresRunStore:
                         _resource_type_from_arn(arn),
                         item.get("selection_mode"),
                         item.get("resource_region"),
-                        self._Jsonb(item),
+                        self._Jsonb(_json_safe(item)),
                     ),
                 )
 
@@ -740,7 +754,7 @@ class PostgresRunStore:
                         local_path,
                         artifact.get("object_url"),
                         content_sha256,
-                        self._Jsonb(content_json) if content_json is not None else None,
+                        self._Jsonb(_json_safe(content_json)) if content_json is not None else None,
                         file_size_bytes,
                     ),
                 )
@@ -772,7 +786,7 @@ class PostgresRunStore:
                             "Latest",
                             timestamp,
                             float(status_code),
-                            self._Jsonb({"error": record.get("error")}),
+                            self._Jsonb(_json_safe({"error": record.get("error")})),
                         ),
                     )
                 if timestamp and healthy is not None:
@@ -790,7 +804,7 @@ class PostgresRunStore:
                             "Latest",
                             timestamp,
                             1.0 if bool(healthy) else 0.0,
-                            self._Jsonb({"error": record.get("error")}),
+                            self._Jsonb(_json_safe({"error": record.get("error")})),
                         ),
                     )
 
@@ -835,6 +849,6 @@ class PostgresRunStore:
                     "Sum",
                     metric_timestamp,
                     float(value),
-                    self._Jsonb(dimensions),
+                    self._Jsonb(_json_safe(dimensions)),
                 ),
             )
