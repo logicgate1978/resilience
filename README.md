@@ -1611,8 +1611,8 @@ Dry run also prints an approver-friendly ASCII table that summarizes:
 - each planned action
 - the execution engine and action type
 - dependencies from `start_after`
-- impacted resource counts and resolved resource examples
-- key action parameters
+- resolved impacted resource examples
+- key action parameters, excluding framework-only readiness and timeout controls
 
 The same table is written to `outdir` as `dry_run_approval_summary_<name>.txt`.
 

@@ -303,11 +303,28 @@ def _stringify_value(value: Any) -> str:
     return str(value)
 
 
+_NON_RESOURCE_PARAMETER_KEYS = {
+    "waitForReady",
+    "timeoutSeconds",
+    "requireQuiesce",
+    "finalSyncGraceSeconds",
+    "wait_for_ready",
+    "timeout_seconds",
+    "require_quiesce",
+    "final_sync_grace_seconds",
+    "action",
+    "mode",
+    "comment",
+}
+
+
 def _format_key_parameters(data: Dict[str, Any]) -> str:
     if not isinstance(data, dict) or not data:
         return "-"
     parts = []
     for key, value in data.items():
+        if str(key) in _NON_RESOURCE_PARAMETER_KEYS:
+            continue
         if value is None or value == "" or value == [] or value == {}:
             continue
         parts.append(f"{key}={_stringify_value(value)}")
@@ -332,7 +349,6 @@ def _render_ascii_table(headers: List[str], rows: List[List[str]]) -> str:
         "Region": 18,
         "Zone": 16,
         "Start After": 24,
-        "Impacted Count": 14,
         "Impacted Resources": 52,
         "Key Parameters": 52,
     }
@@ -389,7 +405,6 @@ def _build_fis_dry_run_rows(
                 str(resolve_service_region(manifest, svc) or "-"),
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(svc.get("start_after")),
-                str(len(impacted)),
                 _summarize_impacted_resources(impacted),
                 _format_key_parameters(action_obj.get("parameters") or {}),
             ]
@@ -458,7 +473,6 @@ def _build_custom_dry_run_rows(
                 str(item.get("region") or resolve_service_region(manifest, svc) or "-"),
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
-                str(len(impacted)),
                 _summarize_impacted_resources(impacted),
                 _format_key_parameters(item.get("parameters") or {}),
             ]
@@ -506,7 +520,6 @@ def _build_arc_dry_run_rows(
                 str(region_value),
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
-                str(len(impacted)),
                 _summarize_impacted_resources(impacted),
                 _format_key_parameters(params),
             ]
@@ -528,24 +541,16 @@ def _build_dry_run_summary_text(
         "Region",
         "Zone",
         "Start After",
-        "Impacted Count",
         "Impacted Resources",
         "Key Parameters",
     ]
     parallel_note = "actions without start_after will run in parallel"
-    total_impacted = 0
-    for row in rows:
-        try:
-            total_impacted += int(row[7])
-        except Exception:
-            pass
 
     lines = [
         "DRY RUN APPROVAL SUMMARY",
         f"Manifest: {manifest_path}",
         f"Engine family: {engine_family.upper()}",
         f"Actions: {len(rows)}",
-        f"Impacted resources: {total_impacted}",
         f"Note: {parallel_note}",
         "",
         _render_ascii_table(headers, rows),
