@@ -3,12 +3,12 @@ region: ap-southeast-2
 services:
 - name: efs
   action: failback-safe
-  tags: Name=resilience-efs-replication-secondary
+  tags: Name=test-efs
   target:
     destination_region: ap-southeast-1
-    destination_tags: Name=resilience-efs-replication-primary
+    destination_tags: Name=test-efs
   wait_for_ready: true
   timeout_seconds: 3600
   parameters:
     require_quiesce: true
-    final_sync_grace_seconds: 120
+    final_sync_grace_seconds: 180
