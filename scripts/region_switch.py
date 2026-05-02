@@ -8,6 +8,7 @@ from kubernetes.client.exceptions import ApiException
 from component_actions.dns import DNSAction
 from component_actions.k8s_auth import create_apps_v1_api
 from utility import (
+    log_message,
     resolve_service_primary_region,
     resolve_service_region,
     resolve_service_secondary_region,
@@ -67,18 +68,18 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
         action_key = f"{name}:{action}"
-        print(f"[INFO] Running region validation: {action_key}", flush=True)
+        log_message("INFO", f"Running region validation: {action_key}")
         if name == "rds" and action in REGION_ACTION_CONFIG:
             _validate_region_rds_service(manifest, svc, i)
-            print(f"[OK] Region validation passed: {action_key}", flush=True)
+            log_message("OK", f"Region validation passed: {action_key}")
             continue
         if name == "eks" and action == "scale-deployment":
             _validate_region_eks_service(manifest, svc, i)
-            print(f"[OK] Region validation passed: {action_key}", flush=True)
+            log_message("OK", f"Region validation passed: {action_key}")
             continue
         if name == "dns" and action in ("set-value", "set-weight"):
             _validate_region_dns_service(svc, i)
-            print(f"[OK] Region validation passed: {action_key}", flush=True)
+            log_message("OK", f"Region validation passed: {action_key}")
             continue
         raise ValueError(f"Unsupported region resilience service action: {name}:{action}")
 
@@ -230,10 +231,10 @@ def execute_region_plan(
 
                 failed_deps = [dep for dep in deps if results[dep].get("status") != "completed"]
                 if failed_deps:
-                    print(
-                        f"[INFO] Skipping region action {item.get('service')} "
-                        f"because dependency action(s) did not complete successfully: {', '.join(failed_deps)}"
-                    , flush=True)
+                    log_message(
+                        "INFO",
+                        f"Skipping region action {item.get('service')} because dependency action(s) did not complete successfully: {', '.join(failed_deps)}",
+                    )
                     results[item_name] = {
                         "name": item_name,
                         "engine": item.get("engine"),
@@ -251,7 +252,7 @@ def execute_region_plan(
                     made_progress = True
                     continue
 
-                print(f"[INFO] Starting region action: {item.get('service')} ({item_name})", flush=True)
+                log_message("INFO", f"Starting region action: {item.get('service')} ({item_name})")
                 running[executor.submit(_execute, item)] = item_name
                 pending.remove(item_name)
                 made_progress = True
@@ -280,10 +281,10 @@ def execute_region_plan(
                             },
                         }
                     result = results[item_name]
-                    print(
-                        f"[INFO] Finished region action: {items_by_name[item_name].get('service')} "
-                        f"({item_name}) status={result.get('status')}"
-                    , flush=True)
+                    log_message(
+                        "INFO",
+                        f"Finished region action: {items_by_name[item_name].get('service')} ({item_name}) status={result.get('status')}",
+                    )
                     made_progress = True
 
             if not made_progress and pending:
@@ -575,10 +576,10 @@ def _execute_arc_item(
     plan_client = session.client("arc-region-switch", region_name=item["planControlRegion"])
     start_time = datetime.now(timezone.utc).isoformat()
 
-    print(f"[INFO] ARC is running: {item['service']}", flush=True)
+    log_message("INFO", f"ARC is running: {item['service']}")
     plan = plan_client.create_plan(**item["payload"])["plan"]
     plan_arn = plan["arn"]
-    print(f"[OK] Created ARC Region switch plan: {plan_arn}", flush=True)
+    log_message("OK", f"Created ARC Region switch plan: {plan_arn}")
 
     request = dict(item["request"])
     execution_client = session.client("arc-region-switch", region_name=request["targetRegion"])
@@ -591,7 +592,7 @@ def _execute_arc_item(
         timeout_seconds=min(timeout_seconds, 300),
     )
     execution_id = execution["executionId"]
-    print(f"[OK] Started ARC Region switch executionId: {execution_id}", flush=True)
+    log_message("OK", f"Started ARC Region switch executionId: {execution_id}")
 
     final_execution = _wait_for_arc_execution(
         client=execution_client,
@@ -639,7 +640,7 @@ def _start_arc_plan_execution_with_retry(
     last_error: Exception | None = None
     attempt = 0
 
-    print(f"[INFO] Waiting for ARC plan to become executable: {plan_arn}", flush=True)
+    log_message("INFO", f"Waiting for ARC plan to become executable: {plan_arn}")
 
     while time.time() < deadline:
         try:
@@ -648,7 +649,7 @@ def _start_arc_plan_execution_with_retry(
             last_error = exc
             attempt += 1
             if attempt == 1 or attempt % 3 == 0:
-                print(f"[INFO] ARC plan not ready yet (attempt {attempt}): {exc}", flush=True)
+                log_message("INFO", f"ARC plan not ready yet (attempt {attempt}): {exc}")
             sleep_seconds = max(1, poll_seconds)
             time.sleep(sleep_seconds)
 
@@ -667,10 +668,10 @@ def _execute_sdk_item(
     start_time = datetime.now(timezone.utc).isoformat()
     request = item["request"]
 
-    print(
-        f"[INFO] Starting non-ARC region action {item['action']} via {request['sdkApi']} "
-        f"in region {item['clientRegion']}"
-    , flush=True)
+    log_message(
+        "INFO",
+        f"Starting non-ARC region action {item['action']} via {request['sdkApi']} in region {item['clientRegion']}",
+    )
 
     sdk_api = getattr(client, request["sdkApi"])
     response = sdk_api(**request["params"])
@@ -712,10 +713,10 @@ def _execute_region_eks_item(
     wait_for_ready = bool(params["waitForReady"])
     effective_timeout_seconds = int(params.get("timeoutSeconds") or timeout_seconds)
 
-    print(
-        f"[INFO] Starting region custom action {item['service']} in region {item['region']} "
-        f"for deployment {namespace}/{deployment_name}"
-    , flush=True)
+    log_message(
+        "INFO",
+        f"Starting region custom action {item['service']} in region {item['region']} for deployment {namespace}/{deployment_name}",
+    )
 
     try:
         api = create_apps_v1_api(session, item["region"], cluster_identifier)
@@ -843,7 +844,7 @@ def _execute_region_dns_item(
     poll_seconds: int,
     timeout_seconds: int,
 ) -> Dict[str, Any]:
-    print(f"[INFO] Starting region custom action {item['service']}", flush=True)
+    log_message("INFO", f"Starting region custom action {item['service']}")
     return DNSAction().execute_item(
         session=session,
         item=item,
@@ -876,10 +877,10 @@ def _wait_for_arc_execution(
             raise TimeoutError(
                 f"Region switch execution {execution_id} timed out after {timeout_seconds}s (last={status})."
             )
-        print(
-            f"[INFO] ARC is running: executionId={execution_id} status={status} "
-            f"elapsed={int(time.time() - start)}s"
-        , flush=True)
+        log_message(
+            "INFO",
+            f"ARC is running: executionId={execution_id} status={status} elapsed={int(time.time() - start)}s",
+        )
         time.sleep(poll_seconds)
 
 

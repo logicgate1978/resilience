@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from utility import normalize_service_name, resolve_service_region, resolve_service_zone
+from utility import log_message, normalize_service_name, resolve_service_region, resolve_service_zone
 from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
 from validations.dns import DNSValidator
@@ -101,12 +101,6 @@ def validate_manifest_services(
             zone=service_zone,
         )
         for validation_name in validation_names:
-            print(
-                f"[INFO] Running validation: {action_key} -> {validation_name}",
-                flush=True,
-            )
+            log_message("INFO", f"Running validation: {action_key} -> {validation_name}")
             validator.run(validation_name, context)
-            print(
-                f"[OK] Validation passed: {action_key} -> {validation_name}",
-                flush=True,
-            )
+            log_message("OK", f"Validation passed: {action_key} -> {validation_name}")

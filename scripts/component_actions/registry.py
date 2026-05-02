@@ -5,7 +5,7 @@ import importlib
 import pkgutil
 from typing import Any, Dict, List, Optional, Tuple
 
-from utility import coerce_bool, normalize_service_name, resolve_service_region, utc_ts
+from utility import coerce_bool, log_message, normalize_service_name, resolve_service_region, utc_ts
 
 from .base import CustomComponentAction
 
@@ -298,10 +298,10 @@ def execute_custom_plan(
 
                 failed_deps = [dep for dep in deps if results[dep].get("status") != "completed"]
                 if failed_deps:
-                    print(
-                        f"[INFO] Skipping custom action {item.get('service')} "
-                        f"because dependency action(s) did not complete successfully: {', '.join(failed_deps)}"
-                    , flush=True)
+                    log_message(
+                        "INFO",
+                        f"Skipping custom action {item.get('service')} because dependency action(s) did not complete successfully: {', '.join(failed_deps)}",
+                    )
                     results[item_name] = {
                         "name": item_name,
                         "status": "skipped",
@@ -318,7 +318,7 @@ def execute_custom_plan(
                     made_progress = True
                     continue
 
-                print(f"[INFO] Starting custom action: {item.get('service')} ({item_name})", flush=True)
+                log_message("INFO", f"Starting custom action: {item.get('service')} ({item_name})")
                 running[executor.submit(_execute, item)] = item_name
                 pending.remove(item_name)
                 made_progress = True
@@ -346,10 +346,10 @@ def execute_custom_plan(
                             },
                         }
                     result = results[item_name]
-                    print(
-                        f"[INFO] Finished custom action: {items_by_name[item_name].get('service')} "
-                        f"({item_name}) status={result.get('status')}"
-                    , flush=True)
+                    log_message(
+                        "INFO",
+                        f"Finished custom action: {items_by_name[item_name].get('service')} ({item_name}) status={result.get('status')}",
+                    )
                     made_progress = True
 
             if not made_progress and pending:

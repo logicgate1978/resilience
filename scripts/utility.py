@@ -14,6 +14,11 @@ def utc_ts() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def log_message(level: str, message: str) -> None:
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    print(f"[{timestamp}] [{str(level or '').strip().upper()}] {message}", flush=True)
+
+
 def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 

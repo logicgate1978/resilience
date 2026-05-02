@@ -5,7 +5,7 @@ import botocore.exceptions
 
 from component_actions.base import CustomComponentAction
 from resource import collect_service_resource_arns
-from utility import normalize_service_name, parse_tags, resolve_service_zone
+from utility import log_message, normalize_service_name, parse_tags, resolve_service_zone
 
 
 def _utc_now_iso() -> str:
@@ -216,6 +216,34 @@ def _wait_for_replication_deleted(
             "sourceReplications": replications,
         }
         if replication is None:
+            return last_observed
+
+        if time.time() > deadline:
+            raise TimeoutError(timeout_reason + f" Last observed state: {last_observed}")
+        time.sleep(max(1, poll_seconds))
+
+
+def _wait_for_file_system_not_in_replication(
+    *,
+    efs,
+    file_system_id: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+    timeout_reason: str,
+) -> Dict[str, Any]:
+    import time
+
+    deadline = time.time() + timeout_seconds
+    last_observed: Dict[str, Any] = {}
+    while True:
+        replications = _describe_replications_for_file_system(efs, file_system_id)
+        fs = _describe_file_system(efs, file_system_id)
+        protection_state = _replication_overwrite_protection(fs)
+        last_observed = {
+            "replications": replications,
+            "replicationOverwriteProtection": protection_state,
+        }
+        if not replications and protection_state != "REPLICATING":
             return last_observed
 
         if time.time() > deadline:
@@ -619,23 +647,25 @@ class EFSFailbackAction(CustomComponentAction):
                 require_quiesce = bool(params.get("requireQuiesce"))
                 final_sync_grace_seconds = int(params.get("finalSyncGraceSeconds") or 0)
                 if require_quiesce:
-                    print(
-                        "[WARN] efs:failback-safe assumes application writes have been quiesced on the current source before final cutback.",
-                        flush=True,
+                    log_message(
+                        "WARN",
+                        "efs:failback-safe assumes application writes have been quiesced on the current source before final cutback.",
                     )
                 if final_sync_grace_seconds > 0:
-                    print(
-                        f"[INFO] efs:failback-safe waiting final sync grace window: {final_sync_grace_seconds}s",
-                        flush=True,
-                    )
+                    log_message("INFO", f"efs:failback-safe waiting final sync grace window: {final_sync_grace_seconds}s")
                     time.sleep(final_sync_grace_seconds)
 
+                log_message(
+                    "INFO",
+                    f"efs:failback-safe deleting reverse replication: {source_file_system_id} -> {destination_file_system_id}",
+                )
                 source_efs.delete_replication_configuration(SourceFileSystemId=source_file_system_id)
                 last_observed["reverseReplicationBeforeDelete"] = {
                     "lastReplicatedTimestamp": reverse_last_sync,
                     "finalSyncGraceSeconds": final_sync_grace_seconds,
                     "requireQuiesce": require_quiesce,
                 }
+                log_message("INFO", "efs:failback-safe waiting for reverse replication deletion to fully propagate")
                 last_observed["reverseReplicationDeleteState"] = _wait_for_replication_deleted(
                     efs=source_efs,
                     source_file_system_id=source_file_system_id,
@@ -644,7 +674,25 @@ class EFSFailbackAction(CustomComponentAction):
                     timeout_seconds=effective_timeout_seconds,
                     timeout_reason="Timed out waiting for the reverse EFS replication configuration to be deleted.",
                 )
+                log_message(
+                    "INFO",
+                    f"efs:failback-safe waiting for original primary file system {destination_file_system_id} to leave replication state",
+                )
+                last_observed["forwardSourceReadyState"] = _wait_for_file_system_not_in_replication(
+                    efs=destination_efs,
+                    file_system_id=destination_file_system_id,
+                    poll_seconds=poll_seconds,
+                    timeout_seconds=effective_timeout_seconds,
+                    timeout_reason=(
+                        "Timed out waiting for the original primary EFS file system to fully leave "
+                        "the reverse replication configuration."
+                    ),
+                )
 
+                log_message(
+                    "INFO",
+                    f"efs:failback-safe creating restored forward replication: {destination_file_system_id} -> {source_file_system_id}",
+                )
                 _prepare_destination_for_replication(
                     efs=source_efs,
                     file_system_id=source_file_system_id,
@@ -657,6 +705,7 @@ class EFSFailbackAction(CustomComponentAction):
                     destination_region=source_region,
                     destination_file_system_id=source_file_system_id,
                 )
+                log_message("INFO", "efs:failback-safe waiting for restored forward replication to become ENABLED")
                 last_observed["forwardReplicationState"] = _wait_for_replication_enabled(
                     efs=destination_efs,
                     source_file_system_id=destination_file_system_id,
