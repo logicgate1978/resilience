@@ -1,5 +1,6 @@
 region: ap-southeast-1
 
+services:
 - name: efs
   action: failover
   tags: Name=test-efs
