@@ -205,6 +205,17 @@ def _artifact_entry(
     }
 
 
+def _mask_db_dsn(dsn: str) -> str:
+    text = str(dsn or "").strip()
+    if not text:
+        return ""
+    masked = text
+    masked = masked.replace("\n", " ").replace("\r", " ")
+    masked = __import__("re").sub(r"(password\s*=\s*)([^ ]+)", r"\1***", masked, flags=__import__("re").IGNORECASE)
+    masked = __import__("re").sub(r"(postgres(?:ql)?://[^:\s]+:)([^@/\s]+)(@)", r"\1***\3", masked, flags=__import__("re").IGNORECASE)
+    return masked
+
+
 def _db_run_status(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in {"completed", "failed", "stopped", "skipped", "running"}:
@@ -617,9 +628,14 @@ def main() -> int:
     artifact_entries: List[Dict[str, Any]] = [
         _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest)
     ]
+    if str(args.db_dsn or "").strip():
+        log_message("INFO", f"Database persistence requested: {_mask_db_dsn(args.db_dsn)}")
+    else:
+        log_message("INFO", "Database persistence disabled: no DB_DSN / DATABASE_URL / --db-dsn provided.")
     db_store = _db_safe_call(PostgresRunStore.from_dsn, args.db_dsn)
     run_id = None
     if db_store is not None:
+        log_message("INFO", "Database persistence enabled: creating run record.")
         run_id = _db_safe_call(
             db_store.create_run,
             manifest=manifest,
@@ -629,6 +645,10 @@ def main() -> int:
             skip_validation=args.skip_validation,
             repo_root=REPO_ROOT,
         )
+        if run_id:
+            log_message("OK", f"Created DB run record: {run_id}")
+        else:
+            log_message("WARN", "Database persistence is enabled but the initial run record was not created.")
 
     ensure_dir(args.outdir)
 
