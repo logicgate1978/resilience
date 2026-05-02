@@ -331,6 +331,19 @@ def _format_key_parameters(data: Dict[str, Any]) -> str:
     return ", ".join(parts) if parts else "-"
 
 
+def _dry_run_key_parameters_for_service(
+    *,
+    svc: Dict[str, Any],
+    fallback: Dict[str, Any],
+) -> str:
+    service_name = normalize_service_name(svc.get("name"))
+    action_name = str(svc.get("action") or "").strip().lower()
+    if service_name == "dns" and action_name in ("set-value", "set-weight"):
+        value = str(svc.get("value") or "").strip()
+        return f"value={value}" if value else "-"
+    return _format_key_parameters(fallback)
+
+
 def _truncate(value: str, width: int) -> str:
     text = str(value or "")
     if len(text) <= width:
@@ -406,7 +419,10 @@ def _build_fis_dry_run_rows(
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _format_key_parameters(action_obj.get("parameters") or {}),
+                _dry_run_key_parameters_for_service(
+                    svc=svc,
+                    fallback=action_obj.get("parameters") or {},
+                ),
             ]
         )
     return rows
@@ -474,7 +490,10 @@ def _build_custom_dry_run_rows(
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _format_key_parameters(item.get("parameters") or {}),
+                _dry_run_key_parameters_for_service(
+                    svc=svc,
+                    fallback=item.get("parameters") or {},
+                ),
             ]
         )
     return rows
@@ -521,7 +540,10 @@ def _build_arc_dry_run_rows(
                 str(resolve_service_zone(manifest, svc) or "-"),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _format_key_parameters(params),
+                _dry_run_key_parameters_for_service(
+                    svc=svc,
+                    fallback=params,
+                ),
             ]
         )
     return rows
