@@ -1274,7 +1274,7 @@ Current behavior:
 
 ### Automatic Impacted-Resource Metrics
 
-Automatic metric collection is derived from `impacted_resources.json` using `SERVICE_CLOUDWATCH_METRICS_MAP`.
+Automatic metric collection is derived from `impacted_resources.json` using `SERVICE_CLOUDWATCH_METRICS_MAP`, with an additional EFS-specific resolver for replication-aware metrics.
 
 Current mappings:
 
@@ -1293,16 +1293,23 @@ Current mappings:
   - `VolumeReadIOPs`
   - `VolumeWriteIOPs`
   - `AuroraReplicaLagMaximum`
+- `efs`
+  - `ClientConnections`
+  - `DataWriteIOBytes`
+  - `TotalIOBytes`
+  - `TimeSinceLastSync`
+  - `TimeSinceLastSync` uses both `FileSystemId` and `DestinationFileSystemId` dimensions, so it is resolved only for `efs:failover`, `efs:failback`, and `efs:failback-safe`
 
 ### Important Note
 
-The auto-collection mapping lives in `SERVICE_CLOUDWATCH_METRICS_MAP`.
+The base auto-collection mapping lives in `SERVICE_CLOUDWATCH_METRICS_MAP`.
 
 Today it supports:
 
 - `asg`
 - `rds:db`
 - `rds:cluster`
+- `efs` for `efs:failover`, `efs:failback`, and `efs:failback-safe`
 
 CloudWatch stat is still hardcoded to `Sum` for all metrics. This is a known simplification and a natural future improvement point.
 

@@ -7,7 +7,15 @@ import botocore
 import urllib.error
 import urllib.request
 
-from utility import append_csv_row, get_account_id, parse_tags, sanitize_filename
+from utility import (
+    append_csv_row,
+    get_account_id,
+    normalize_service_name,
+    parse_tags,
+    resolve_service_region,
+    resolve_service_zone,
+    sanitize_filename,
+)
 
 
 SERVICE_CLOUDWATCH_METRICS_MAP: Dict[str, Dict[str, Any]] = {
@@ -42,6 +50,16 @@ SERVICE_CLOUDWATCH_METRICS_MAP: Dict[str, Dict[str, Any]] = {
         ],
     },
 }
+
+EFS_FILE_SYSTEM_METRICS = [
+    "ClientConnections",
+    "DataWriteIOBytes",
+    "TotalIOBytes",
+]
+
+EFS_REPLICATION_METRICS = [
+    "TimeSinceLastSync",
+]
 
 
 def parse_observability(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -376,6 +394,183 @@ def _resolve_impacted_resource_cloudwatch(item: Dict[str, str]) -> Optional[Dict
     return None
 
 
+def _extract_efs_id_from_arn(arn: str) -> Optional[str]:
+    marker = "file-system/"
+    if marker not in arn:
+        return None
+    file_system_id = arn.split(marker, 1)[1] or ""
+    return file_system_id or None
+
+
+def _describe_efs_replications_for_file_system(efs_client, file_system_id: str) -> List[Dict[str, Any]]:
+    try:
+        response = efs_client.describe_replication_configurations(FileSystemId=file_system_id)
+    except botocore.exceptions.ClientError as e:
+        code = str(e.response.get("Error", {}).get("Code") or "").strip()
+        if code == "ReplicationNotFound":
+            return []
+        raise
+    return list(response.get("Replications") or [])
+
+
+def _resolve_efs_destination_from_service(
+    session,
+    *,
+    destination_region: str,
+    destination_file_system_id: Optional[str],
+    destination_tags: Dict[str, str],
+) -> Optional[str]:
+    from resource import _collect_efs_file_systems
+
+    arns = _collect_efs_file_systems(
+        session,
+        destination_region,
+        destination_tags,
+        identifier=destination_file_system_id,
+    )
+    if len(arns) != 1:
+        return None
+    return _extract_efs_id_from_arn(arns[0])
+
+
+def _efs_file_system_metric_spec(*, service: str, arn: str, file_system_id: str) -> Dict[str, Any]:
+    return {
+        "service": service,
+        "arn": arn,
+        "namespace": "AWS/EFS",
+        "dimensions": [{"Name": "FileSystemId", "Value": file_system_id}],
+        "metrics": list(EFS_FILE_SYSTEM_METRICS),
+        "csv_prefix": sanitize_filename(f"efs_{file_system_id}"),
+    }
+
+
+def _efs_replication_metric_spec(*, service: str, arn: str, source_file_system_id: str, destination_file_system_id: str) -> Dict[str, Any]:
+    return {
+        "service": service,
+        "arn": arn,
+        "namespace": "AWS/EFS",
+        "dimensions": [
+            {"Name": "FileSystemId", "Value": source_file_system_id},
+            {"Name": "DestinationFileSystemId", "Value": destination_file_system_id},
+        ],
+        "metrics": list(EFS_REPLICATION_METRICS),
+        "csv_prefix": sanitize_filename(f"efs_replication_{source_file_system_id}_{destination_file_system_id}"),
+    }
+
+
+def _resolve_efs_observability_resources(
+    manifest: Dict[str, Any],
+    *,
+    session,
+    default_region: str,
+) -> List[Dict[str, Any]]:
+    from resource import collect_service_resource_arns
+
+    out: List[Dict[str, Any]] = []
+    services = manifest.get("services") or []
+    if not isinstance(services, list):
+        return out
+
+    for svc in services:
+        if not isinstance(svc, dict):
+            continue
+        service_name = normalize_service_name(svc.get("name"))
+        action_name = str(svc.get("action") or "").strip().lower()
+        if service_name != "efs" or action_name not in ("failover", "failback", "failback-safe"):
+            continue
+
+        service_label = f"{service_name}:{action_name}"
+        service_region = resolve_service_region(manifest, svc, default=default_region)
+        if not service_region:
+            continue
+        service_zone = resolve_service_zone(manifest, svc)
+
+        try:
+            source_arns = collect_service_resource_arns(
+                svc,
+                session=session,
+                region=service_region,
+                zone=service_zone,
+            )
+        except Exception:
+            continue
+
+        if action_name == "failover":
+            efs_client = session.client("efs", region_name=service_region)
+            for source_arn in source_arns:
+                source_file_system_id = _extract_efs_id_from_arn(source_arn)
+                if not source_file_system_id:
+                    continue
+                out.append(
+                    _efs_file_system_metric_spec(
+                        service=service_label,
+                        arn=source_arn,
+                        file_system_id=source_file_system_id,
+                    )
+                )
+                try:
+                    replications = _describe_efs_replications_for_file_system(efs_client, source_file_system_id)
+                except Exception:
+                    continue
+                for replication in replications:
+                    for destination in replication.get("Destinations") or []:
+                        destination_file_system_id = str(destination.get("FileSystemId") or "").strip()
+                        if not destination_file_system_id:
+                            continue
+                        out.append(
+                            _efs_replication_metric_spec(
+                                service=service_label,
+                                arn=source_arn,
+                                source_file_system_id=source_file_system_id,
+                                destination_file_system_id=destination_file_system_id,
+                            )
+                        )
+
+        else:
+            if len(source_arns) != 1:
+                continue
+            source_arn = source_arns[0]
+            source_file_system_id = _extract_efs_id_from_arn(source_arn)
+            if not source_file_system_id:
+                continue
+
+            target = svc.get("target") or {}
+            if not isinstance(target, dict):
+                continue
+            destination_region = str(target.get("destination_region") or "").strip()
+            if not destination_region:
+                continue
+            destination_file_system_id = str(target.get("destination_file_system_id") or "").strip() or None
+            destination_tags = parse_tags(target.get("destination_tags"))
+            if not destination_file_system_id:
+                destination_file_system_id = _resolve_efs_destination_from_service(
+                    session,
+                    destination_region=destination_region,
+                    destination_file_system_id=None,
+                    destination_tags=destination_tags,
+                )
+            if not destination_file_system_id:
+                continue
+
+            out.append(
+                _efs_file_system_metric_spec(
+                    service=service_label,
+                    arn=source_arn,
+                    file_system_id=source_file_system_id,
+                )
+            )
+            out.append(
+                _efs_replication_metric_spec(
+                    service=service_label,
+                    arn=source_arn,
+                    source_file_system_id=source_file_system_id,
+                    destination_file_system_id=destination_file_system_id,
+                )
+            )
+
+    return out
+
+
 def cloudwatch_metrics_loop(
     stop_event: threading.Event,
     lock: threading.Lock,
@@ -607,6 +802,55 @@ def start_observability_collectors(
         if not resolved:
             continue
 
+        key = (
+            resolved["namespace"],
+            tuple((d["Name"], d["Value"]) for d in resolved["dimensions"]),
+            tuple(resolved["metrics"]),
+        )
+        if key in seen_resource_keys:
+            continue
+        seen_resource_keys.add(key)
+
+        samples: List[Dict[str, Any]] = []
+        obs_results["cloudwatch"]["resources"].append(
+            {
+                "service": resolved["service"],
+                "arn": resolved["arn"],
+                "resolved": {
+                    "namespace": resolved["namespace"],
+                    "dimensions": resolved["dimensions"],
+                    "metrics": resolved["metrics"],
+                    "csv_prefix": resolved["csv_prefix"],
+                },
+                "samples": samples,
+            }
+        )
+
+        t = threading.Thread(
+            target=cloudwatch_metrics_loop,
+            name=f"cloudwatch_metrics_loop_{resolved['csv_prefix']}",
+            daemon=True,
+            args=(
+                stop_event,
+                lock,
+                samples,
+                cw_client,
+                resolved["namespace"],
+                resolved["dimensions"],
+                resolved["metrics"],
+                interval_s,
+                resolved["csv_prefix"],
+                outdir,
+            ),
+        )
+        t.start()
+        threads.append(t)
+
+    for resolved in _resolve_efs_observability_resources(
+        manifest,
+        session=session,
+        default_region=region,
+    ):
         key = (
             resolved["namespace"],
             tuple((d["Name"], d["Value"]) for d in resolved["dimensions"]),
