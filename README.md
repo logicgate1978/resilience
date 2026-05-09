@@ -1391,6 +1391,8 @@ Current grouping behavior:
 - `asg_*` -> Auto Scaling
 - `rds_db_*` -> RDS DB
 - `rds_cluster_*` -> RDS Cluster
+- `efs_*` -> EFS
+- `efs_replication_*` -> EFS Replication
 - other `<prefix>_*` -> Load Balancer: `<prefix>`
 
 The report currently expects a `result_*.json` file with:

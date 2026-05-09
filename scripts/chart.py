@@ -169,6 +169,12 @@ def _infer_group_from_filename(csv_filename: str) -> str:
     if base.startswith("rds_cluster_"):
         return "RDS Cluster"
 
+    if base.startswith("efs_replication_"):
+        return "EFS Replication"
+
+    if base.startswith("efs_"):
+        return "EFS"
+
     if "_" not in base:
         return "Metrics"
 
