@@ -256,7 +256,8 @@ def _chart_health_check(path: str, win: ExperimentWindow) -> Optional[ChartImage
     ax2.set_ylabel("Healthy (1/0)")
     ax2.set_ylim(-0.1, 1.1)
 
-    fig.text(0.5, 0.02, "Health Check: HTTP Status Code over Time", ha="center", va="bottom", fontsize=12)
+    ax1.set_xlabel("Time", labelpad=12)
+    fig.text(0.5, 0.002, "Health Check: HTTP Status Code over Time", ha="center", va="bottom", fontsize=12)
 
     png_b64 = _fig_to_base64_png(fig)
     return ChartImage(
@@ -298,11 +299,11 @@ def _chart_metric(path: str, win: ExperimentWindow) -> Optional[ChartImage]:
     title = os.path.basename(path)
     fig, ax = plt.subplots(figsize=(10, 4.8))
     ax.plot(times, values, marker="o", linestyle="-")
-    ax.set_xlabel("Time")
+    ax.set_xlabel("Time", labelpad=12)
     ax.set_ylabel("Value")
     _annotate_experiment_window(ax, win)
 
-    fig.text(0.5, 0.02, f"Metric: {title}", ha="center", va="bottom", fontsize=12)
+    fig.text(0.5, 0.002, f"Metric: {title}", ha="center", va="bottom", fontsize=12)
 
     png_b64 = _fig_to_base64_png(fig)
     return ChartImage(
@@ -488,7 +489,7 @@ def generate_report(outdir: str, html_filename: str = "report.html") -> str:
     parts.append("<html>")
     parts.append("<head>")
     parts.append('<meta charset="utf-8"/>')
-    parts.append("<title>FIS Observability Report</title>")
+    parts.append("<title>Resilience Test Observability Report</title>")
     parts.append("""
 <style>
   body { font-family: Arial, sans-serif; margin: 24px; }
@@ -513,7 +514,7 @@ def generate_report(outdir: str, html_filename: str = "report.html") -> str:
 """)
     parts.append("</head>")
     parts.append("<body>")
-    parts.append("<h1>FIS Observability Report</h1>")
+    parts.append("<h1>Resilience Test Observability Report</h1>")
     parts.append(f'<div class="meta">Generated at: {datetime.utcnow().isoformat()}Z</div>')
 
     parts.append('<div class="slo">')
