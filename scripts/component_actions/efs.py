@@ -85,7 +85,7 @@ def _resolve_replication_delete_plan(efs, selected_file_system_ids: List[str]) -
     return replication_by_selected, source_file_system_ids
 
 
-def _resolve_failback_destination(
+def _resolve_replicate_destination(
     *,
     session,
     destination_region: str,
@@ -111,18 +111,18 @@ def _resolve_failback_destination(
     if not destination_arns:
         selector = f"identifier={destination_file_system_id}" if destination_file_system_id else "destination_tags"
         raise ValueError(
-            f"efs:failback did not resolve any destination EFS file systems in {destination_region} using {selector}."
+            f"efs:replicate did not resolve any destination EFS file systems in {destination_region} using {selector}."
         )
     if len(destination_arns) > 1:
         raise ValueError(
-            "efs:failback resolved multiple destination EFS file systems. "
+            "efs:replicate resolved multiple destination EFS file systems. "
             "Please narrow target.destination_file_system_id or target.destination_tags so exactly one destination is selected."
         )
 
     destination_arn = destination_arns[0]
     resolved_file_system_id = _efs_id_from_arn(destination_arn)
     if not resolved_file_system_id:
-        raise ValueError("efs:failback could not extract the destination EFS file system ID from the resolved ARN.")
+        raise ValueError("efs:replicate could not extract the destination EFS file system ID from the resolved ARN.")
     return resolved_file_system_id, destination_arn
 
 
@@ -448,9 +448,9 @@ class EFSFailoverAction(CustomComponentAction):
         }
 
 
-class EFSFailbackAction(CustomComponentAction):
+class EFSReplicateAction(CustomComponentAction):
     service_name = "efs"
-    action_names = ["failback", "failback-safe"]
+    action_names = ["replicate", "failback-safe"]
 
     def build_plan_item(
         self,
@@ -488,7 +488,7 @@ class EFSFailbackAction(CustomComponentAction):
 
         destination_file_system_id = str(target.get("destination_file_system_id") or "").strip() or None
         destination_tags = parse_tags(target.get("destination_tags"))
-        destination_resolved_id, destination_arn = _resolve_failback_destination(
+        destination_resolved_id, destination_arn = _resolve_replicate_destination(
             session=session,
             destination_region=destination_region,
             destination_file_system_id=destination_file_system_id,
@@ -520,8 +520,8 @@ class EFSFailbackAction(CustomComponentAction):
             "service": f"{normalize_service_name(svc.get('name'))}:{action_name}",
             "action": action_name,
             "description": (
-                "Create reverse EFS replication back to the destination file system"
-                if action_name == "failback"
+                "Create EFS replication from the selected source file system to the destination file system"
+                if action_name == "replicate"
                 else "Perform safe EFS failback by reverse-syncing data and restoring forward replication"
             ),
             "target": {
@@ -625,8 +625,8 @@ class EFSFailbackAction(CustomComponentAction):
                     poll_seconds=poll_seconds,
                     timeout_seconds=effective_timeout_seconds,
                     timeout_reason=(
-                        "Timed out waiting for the EFS failback replication configuration to become ENABLED."
-                        if action_name == "failback"
+                        "Timed out waiting for the EFS replication configuration to become ENABLED."
+                        if action_name == "replicate"
                         else "Timed out waiting for the reverse EFS replication configuration to become ENABLED."
                     ),
                 )

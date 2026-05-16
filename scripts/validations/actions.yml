@@ -17,16 +17,16 @@ actions:
     validations:
       - verify_resource_existence
       - verify_replication_configuration_exists
-  - action: efs:failback
+  - action: efs:replicate
     validations:
       - verify_resource_existence
-      - verify_failback_target
-      - verify_failback_state
+      - verify_replicate_target
+      - verify_replicate_state
   - action: efs:failback-safe
     validations:
       - verify_resource_existence
-      - verify_failback_target
-      - verify_failback_state
+      - verify_replicate_target
+      - verify_replicate_state
       - verify_failback_safe_parameters
   - action: ec2:terminate
     validations:

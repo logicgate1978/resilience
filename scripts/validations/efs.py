@@ -26,7 +26,7 @@ class EFSValidator(BaseServiceValidator):
             raise
         return list(response.get("Replications") or [])
 
-    def _resolve_failback_destination(self, context: ValidationContext):
+    def _resolve_replicate_destination(self, context: ValidationContext):
         target = context.service.get("target") or {}
         if not isinstance(target, dict):
             self.fail(context, f"service.target is required for {context.action_key}.")
@@ -49,7 +49,7 @@ class EFSValidator(BaseServiceValidator):
         destination_arns = collect_service_resource_arns(
             {
                 "name": "efs",
-                "action": "failback",
+                "action": "replicate",
                 "identifier": destination_file_system_id or None,
                 "tags": destination_tags_raw,
             },
@@ -60,12 +60,12 @@ class EFSValidator(BaseServiceValidator):
         if not destination_arns:
             self.fail(
                 context,
-                f"no destination EFS file system matched the failback selector in region {destination_region}.",
+                f"no destination EFS file system matched the replication selector in region {destination_region}.",
             )
         if len(destination_arns) > 1:
             self.fail(
                 context,
-                "multiple destination EFS file systems matched the failback selector. "
+                "multiple destination EFS file systems matched the replication selector. "
                 "Please narrow destination_file_system_id or destination_tags.",
             )
         return destination_region, destination_arns[0]
@@ -112,7 +112,7 @@ class EFSValidator(BaseServiceValidator):
                 + ", ".join(sorted(missing)),
             )
 
-    def verify_failback_target(self, context: ValidationContext) -> None:
+    def verify_replicate_target(self, context: ValidationContext) -> None:
         source_arns = context.get_selected_resource_arns()
         if not source_arns:
             self.fail(
@@ -122,19 +122,19 @@ class EFSValidator(BaseServiceValidator):
         if len(source_arns) != 1:
             self.fail(context, f"{context.action_key} requires exactly one source EFS file system.")
 
-        destination_region, destination_arn = self._resolve_failback_destination(context)
+        destination_region, destination_arn = self._resolve_replicate_destination(context)
         if destination_arn == source_arns[0]:
             self.fail(context, "source and destination EFS file systems must be different.")
         if not destination_region:
             self.fail(context, f"service.target.destination_region is required for {context.action_key}.")
 
-    def verify_failback_state(self, context: ValidationContext) -> None:
+    def verify_replicate_state(self, context: ValidationContext) -> None:
         source_arns = context.get_selected_resource_arns()
         if len(source_arns) != 1:
             self.fail(context, f"{context.action_key} requires exactly one source EFS file system.")
 
         source_file_system_id = _efs_id_from_arn(source_arns[0])
-        destination_region, destination_arn = self._resolve_failback_destination(context)
+        destination_region, destination_arn = self._resolve_replicate_destination(context)
         destination_file_system_id = _efs_id_from_arn(destination_arn)
 
         source_replications = self._describe_replications(

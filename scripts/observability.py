@@ -476,7 +476,7 @@ def _resolve_efs_observability_resources(
             continue
         service_name = normalize_service_name(svc.get("name"))
         action_name = str(svc.get("action") or "").strip().lower()
-        if service_name != "efs" or action_name not in ("failover", "failback", "failback-safe"):
+        if service_name != "efs" or action_name not in ("failover", "replicate", "failback-safe"):
             continue
 
         service_label = f"{service_name}:{action_name}"
