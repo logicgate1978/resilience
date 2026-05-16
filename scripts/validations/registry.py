@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from utility import log_message, normalize_service_name, resolve_service_region, resolve_service_zone
+from utility import coerce_bool, log_message, normalize_service_name, resolve_service_region, resolve_service_zone
 from validations.asg import ASGValidator
 from validations.base import ValidationContext, ValidationError
 from validations.dns import DNSValidator
@@ -61,6 +61,14 @@ def get_service_validator(service_name: str):
     return _VALIDATORS.get(normalize_service_name(service_name))
 
 
+def manifest_skip_validation_enabled(manifest: Dict[str, Any]) -> bool:
+    return coerce_bool((manifest or {}).get("skip_validation"), False)
+
+
+def service_skip_validation_enabled(svc: Dict[str, Any]) -> bool:
+    return coerce_bool((svc or {}).get("skip_validation"), False)
+
+
 def validate_manifest_services(
     manifest: Dict[str, Any],
     *,
@@ -68,6 +76,10 @@ def validate_manifest_services(
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> None:
+    if manifest_skip_validation_enabled(manifest):
+        log_message("WARN", "manifest.skip_validation enabled: skipping all pre-execution action validations.")
+        return
+
     services = manifest.get("services") or []
     if not isinstance(services, list):
         return
@@ -82,6 +94,9 @@ def validate_manifest_services(
         action_key = f"{service_name}:{action}"
         validation_names = action_validations.get(action_key) or []
         if not validation_names:
+            continue
+        if service_skip_validation_enabled(svc):
+            log_message("WARN", f"services[].skip_validation enabled: skipping validation for {action_key}.")
             continue
 
         validator = get_service_validator(service_name)

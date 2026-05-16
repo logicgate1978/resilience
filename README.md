@@ -711,7 +711,34 @@ Important sequencing note:
 
 Only actions listed in `scripts/validations/actions.yml` currently run pre-execution validations. If a validation fails, the framework stops before starting the action and returns a descriptive error.
 
-You can bypass these pre-execution checks with the CLI flag `--skip-validation`. That flag skips the validation layer only; manifest loading, engine-family resolution, and the downstream AWS or Kubernetes calls still run and can still fail later.
+Validation can now be skipped in three ways:
+
+- CLI: `--skip-validation`
+  - skips all validations for the run
+- manifest top level:
+  - `skip_validation: true`
+  - skips all validations for the run
+- service action level:
+  - `services[].skip_validation: true`
+  - skips validation only for that action
+
+These controls skip the validation layer only. Manifest loading, engine-family resolution, and the downstream AWS or Kubernetes calls still run and can still fail later.
+
+Example:
+
+```yaml
+skip_validation: true
+
+services:
+- name: ec2
+  action: stop
+  tags: environment=development,project=clouddash
+
+- name: rds
+  action: reboot
+  identifier: database-1
+  skip_validation: true
+```
 
 | Service | Action | Validation | What It Checks |
 | --- | --- | --- | --- |

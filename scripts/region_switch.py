@@ -8,6 +8,7 @@ from kubernetes.client.exceptions import ApiException
 from component_actions.dns import DNSAction
 from component_actions.k8s_auth import create_apps_v1_api
 from utility import (
+    coerce_bool,
     log_message,
     resolve_service_primary_region,
     resolve_service_region,
@@ -58,6 +59,10 @@ def _resolve_global_db_from_side(from_value: Any, primary_region: str, secondary
 
 
 def validate_region_manifest(manifest: Dict[str, Any]) -> None:
+    if coerce_bool((manifest or {}).get("skip_validation"), False):
+        log_message("WARN", "manifest.skip_validation enabled: skipping all ARC pre-execution validations.")
+        return
+
     services = manifest.get("services")
     if not isinstance(services, list) or not services:
         raise ValueError("Top-level 'services' must be a non-empty list.")
@@ -68,6 +73,9 @@ def validate_region_manifest(manifest: Dict[str, Any]) -> None:
         name = (svc.get("name") or "").strip().lower()
         action = (svc.get("action") or "").strip().lower()
         action_key = f"{name}:{action}"
+        if coerce_bool(svc.get("skip_validation"), False):
+            log_message("WARN", f"services[].skip_validation enabled: skipping region validation for {action_key}.")
+            continue
         log_message("INFO", f"Running region validation: {action_key}")
         if name == "rds" and action in REGION_ACTION_CONFIG:
             _validate_region_rds_service(manifest, svc, i)

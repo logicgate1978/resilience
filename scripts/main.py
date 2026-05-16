@@ -43,6 +43,7 @@ from utility import (
     upload_files_to_artifactory,
 )
 from validations import ValidationError, validate_manifest_services
+from validations.registry import manifest_skip_validation_enabled
 
 from chart import generate_report
 from auth import AccessController
@@ -712,6 +713,8 @@ def main() -> int:
 
     manifest = load_manifest(args.manifest)
     engine_family = _resolve_manifest_engine_family(manifest)
+    manifest_skip_validation = manifest_skip_validation_enabled(manifest)
+    global_skip_validation = bool(args.skip_validation or manifest_skip_validation)
     artifact_entries: List[Dict[str, Any]] = [
         _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest)
     ]
@@ -724,7 +727,7 @@ def main() -> int:
             manifest_path=os.path.abspath(args.manifest),
             engine_family=engine_family,
             dry_run=args.dry_run,
-            skip_validation=args.skip_validation,
+            skip_validation=global_skip_validation,
             repo_root=REPO_ROOT,
         )
         if run_id:
@@ -733,8 +736,11 @@ def main() -> int:
             log_message("WARN", "Database persistence is enabled but the initial run record was not created.")
 
     if engine_family == "arc":
-        if args.skip_validation:
-            log_message("WARN", "--skip-validation enabled: skipping ARC pre-execution validation.")
+        if global_skip_validation:
+            if args.skip_validation:
+                log_message("WARN", "--skip-validation enabled: skipping ARC pre-execution validation.")
+            elif manifest_skip_validation:
+                log_message("WARN", "manifest.skip_validation enabled: skipping ARC pre-execution validation.")
             if db_store is not None and run_id:
                 _db_safe_call(
                     db_store.replace_validation_results,
@@ -989,8 +995,11 @@ def main() -> int:
 
     session = _create_runtime_session(args, region)
 
-    if args.skip_validation:
-        log_message("WARN", "--skip-validation enabled: skipping pre-execution action validation.")
+    if global_skip_validation:
+        if args.skip_validation:
+            log_message("WARN", "--skip-validation enabled: skipping pre-execution action validation.")
+        elif manifest_skip_validation:
+            log_message("WARN", "manifest.skip_validation enabled: skipping pre-execution action validation.")
         if db_store is not None and run_id:
             _db_safe_call(
                 db_store.replace_validation_results,

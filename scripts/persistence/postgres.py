@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 from utility import (
+    coerce_bool,
     normalize_service_name,
     resolve_service_primary_region,
     resolve_service_region,
@@ -156,6 +157,14 @@ def _service_occurrence_refs(manifest: Dict[str, Any]) -> Dict[int, str]:
         seen[key] = seen.get(key, 0) + 1
         refs[index] = key if totals[key] == 1 else f"{key}#{seen[key]}"
     return refs
+
+
+def _manifest_skip_validation_enabled(manifest: Dict[str, Any]) -> bool:
+    return coerce_bool((manifest or {}).get("skip_validation"), False)
+
+
+def _service_skip_validation_enabled(svc: Dict[str, Any]) -> bool:
+    return coerce_bool((svc or {}).get("skip_validation"), False)
 
 
 def _supported_rollback_mode(service_name: str, action_name: str) -> Optional[str]:
@@ -505,14 +514,17 @@ class PostgresRunStore:
     ) -> None:
         validations = load_action_validations()
         rows: List[Tuple[str, str, Optional[str]]] = []
+        skip_all = skipped or _manifest_skip_validation_enabled(manifest)
         services = manifest.get("services") or []
         for svc in services:
             if not isinstance(svc, dict):
                 continue
             action_key = f"{normalize_service_name(svc.get('name'))}:{str(svc.get('action') or '').strip().lower()}"
             for validation_name in validations.get(action_key) or []:
-                if skipped:
-                    rows.append((validation_name, "skipped", "Validation skipped by CLI flag."))
+                if skip_all:
+                    rows.append((validation_name, "skipped", "Validation skipped by CLI flag or manifest skip_validation."))
+                elif _service_skip_validation_enabled(svc):
+                    rows.append((validation_name, "skipped", f"Validation skipped by service-level skip_validation for {action_key}."))
                 else:
                     rows.append((validation_name, "passed", None))
 
