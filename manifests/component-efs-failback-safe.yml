@@ -8,7 +8,6 @@ services:
     destination_region: ap-southeast-1
     destination_tags: Name=test-efs
   wait_for_ready: true
-  timeout_seconds: 3600
   parameters:
     require_quiesce: true
     final_sync_grace_seconds: 180

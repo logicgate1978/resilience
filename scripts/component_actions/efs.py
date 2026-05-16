@@ -251,6 +251,34 @@ def _wait_for_file_system_not_in_replication(
         time.sleep(max(1, poll_seconds))
 
 
+def _wait_for_file_system_ready_after_failover(
+    *,
+    efs,
+    file_system_id: str,
+    poll_seconds: int,
+    timeout_seconds: int,
+    timeout_reason: str,
+) -> Dict[str, Any]:
+    import time
+
+    deadline = time.time() + timeout_seconds
+    last_observed: Dict[str, Any] = {}
+    while True:
+        fs = _describe_file_system(efs, file_system_id)
+        lifecycle_state = str(fs.get("LifeCycleState") or "").strip().upper()
+        protection_state = _replication_overwrite_protection(fs)
+        last_observed = {
+            "lifeCycleState": lifecycle_state,
+            "replicationOverwriteProtection": protection_state,
+        }
+        if lifecycle_state == "AVAILABLE" and protection_state != "REPLICATING":
+            return last_observed
+
+        if time.time() > deadline:
+            raise TimeoutError(timeout_reason + f" Last observed state: {last_observed}")
+        time.sleep(max(1, poll_seconds))
+
+
 def _prepare_destination_for_replication(
     *,
     efs,
@@ -379,14 +407,51 @@ class EFSFailoverAction(CustomComponentAction):
         wait_for_ready = bool(params.get("waitForReady"))
         effective_timeout_seconds = int(params.get("timeoutSeconds") or timeout_seconds)
         efs = session.client("efs", region_name=item["region"])
+        file_system_state_clients: Dict[str, Any] = {str(item["region"]): efs}
+        involved_file_systems: List[Dict[str, str]] = []
 
         try:
             replication_before, resolved_source_ids = _resolve_replication_delete_plan(efs, file_system_ids)
             if resolved_source_ids:
                 source_file_system_ids = resolved_source_ids
 
+            seen_file_systems = set()
+            for source_file_system_id in source_file_system_ids:
+                key = (str(item["region"]), source_file_system_id)
+                if key not in seen_file_systems:
+                    seen_file_systems.add(key)
+                    involved_file_systems.append(
+                        {
+                            "region": str(item["region"]),
+                            "fileSystemId": source_file_system_id,
+                            "role": "source",
+                        }
+                    )
+            for replication in replication_before.values():
+                for destination in replication.get("Destinations") or []:
+                    destination_region = str(destination.get("Region") or "").strip()
+                    destination_file_system_id = str(destination.get("FileSystemId") or "").strip()
+                    if not destination_region or not destination_file_system_id:
+                        continue
+                    key = (destination_region, destination_file_system_id)
+                    if key in seen_file_systems:
+                        continue
+                    seen_file_systems.add(key)
+                    involved_file_systems.append(
+                        {
+                            "region": destination_region,
+                            "fileSystemId": destination_file_system_id,
+                            "role": "destination",
+                        }
+                    )
+
+            log_message(
+                "INFO",
+                f"efs:failover deleting replication configuration for source file system(s): {', '.join(source_file_system_ids)}",
+            )
             for source_file_system_id in source_file_system_ids:
                 efs.delete_replication_configuration(SourceFileSystemId=source_file_system_id)
+            log_message("OK", "efs:failover replication configuration delete request submitted.")
         except Exception as e:
             ended_at = _utc_now_iso()
             return {
@@ -402,35 +467,82 @@ class EFSFailoverAction(CustomComponentAction):
             }
 
         last_observed: Dict[str, Any] = {}
+        final_file_system_state: Dict[str, Dict[str, Any]] = {}
         if wait_for_ready:
-            deadline = time.time() + effective_timeout_seconds
-            while True:
-                ready = True
-                last_observed = {}
-                for file_system_id in file_system_ids:
-                    replications = _describe_replications_for_file_system(efs, file_system_id)
-                    last_observed[file_system_id] = replications
-                    if replications:
-                        ready = False
+            try:
+                log_message("INFO", "efs:failover waiting for replication configuration deletion to be observed.")
+                deadline = time.time() + effective_timeout_seconds
+                while True:
+                    ready = True
+                    last_observed = {}
+                    for file_system_id in file_system_ids:
+                        replications = _describe_replications_for_file_system(efs, file_system_id)
+                        last_observed[file_system_id] = replications
+                        if replications:
+                            ready = False
 
-                if ready:
-                    break
+                    if ready:
+                        break
 
-                if time.time() > deadline:
-                    ended_at = _utc_now_iso()
-                    return {
-                        "name": item["name"],
-                        "status": "failed",
-                        "reason": "Timed out waiting for the EFS replication configuration to be deleted.",
-                        "startTime": started_at,
-                        "endTime": ended_at,
-                        "details": {
-                            "target": target,
-                            "parameters": params,
-                            "lastObservedReplicationState": last_observed,
-                        },
-                    }
-                time.sleep(max(1, poll_seconds))
+                    if time.time() > deadline:
+                        ended_at = _utc_now_iso()
+                        return {
+                            "name": item["name"],
+                            "status": "failed",
+                            "reason": "Timed out waiting for the EFS replication configuration to be deleted.",
+                            "startTime": started_at,
+                            "endTime": ended_at,
+                            "details": {
+                                "target": target,
+                                "parameters": params,
+                                "lastObservedReplicationState": last_observed,
+                            },
+                        }
+                    time.sleep(max(1, poll_seconds))
+
+                log_message("OK", "efs:failover replication configuration deleted.")
+                log_message("INFO", "efs:failover verifying EFS file system status across source and destination.")
+                deadline = time.time() + effective_timeout_seconds
+                for fs_target in involved_file_systems:
+                    file_system_region = str(fs_target["region"])
+                    file_system_id = str(fs_target["fileSystemId"])
+                    file_system_role = str(fs_target["role"])
+                    regional_efs = file_system_state_clients.get(file_system_region)
+                    if regional_efs is None:
+                        regional_efs = session.client("efs", region_name=file_system_region)
+                        file_system_state_clients[file_system_region] = regional_efs
+                    remaining_seconds = max(1, int(deadline - time.time()))
+                    log_message(
+                        "INFO",
+                        f"efs:failover verifying {file_system_role} EFS {file_system_id} in {file_system_region} is AVAILABLE and no longer in REPLICATING protection state.",
+                    )
+                    observed_state = _wait_for_file_system_ready_after_failover(
+                        efs=regional_efs,
+                        file_system_id=file_system_id,
+                        poll_seconds=poll_seconds,
+                        timeout_seconds=remaining_seconds,
+                        timeout_reason=(
+                            f"Timed out waiting for EFS file system {file_system_id} in {file_system_region} "
+                            "to reach a ready post-failover state."
+                        ),
+                    )
+                    final_file_system_state[f"{file_system_region}:{file_system_id}"] = observed_state
+                log_message("OK", "efs:failover verified participating EFS file systems are ready.")
+            except Exception as e:
+                ended_at = _utc_now_iso()
+                return {
+                    "name": item["name"],
+                    "status": "failed",
+                    "reason": f"EFS post-failover readiness verification failed: {e}",
+                    "startTime": started_at,
+                    "endTime": ended_at,
+                    "details": {
+                        "target": target,
+                        "parameters": params,
+                        "lastObservedReplicationState": last_observed,
+                        "finalFileSystemState": final_file_system_state,
+                    },
+                }
 
         ended_at = _utc_now_iso()
         return {
@@ -444,6 +556,7 @@ class EFSFailoverAction(CustomComponentAction):
                 "parameters": params,
                 "waitedForDeletion": wait_for_ready,
                 "finalReplicationState": last_observed,
+                "finalFileSystemState": final_file_system_state,
             },
         }
 
