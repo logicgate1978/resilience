@@ -1,0 +1,16 @@
+services:
+- name: rds
+  action: failover-global-db
+  identifier: resilience-aurora-global
+  target_region: ap-southeast-2
+  use_arc: false
+
+observability:
+  start_before: 1
+  stop_after: 2
+  health_check:
+    endpoint: http://example.com/health
+    http_method: get
+    healthy_status_code:
+      - 200
+    interval: 10
