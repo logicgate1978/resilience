@@ -1,3 +1,9 @@
+# failback from ap-southeast-2 to ap-southeast-1
+# final state: EFS replication from ap-southeast-1 (writer) to ap-southeast-2 (replica)
+# step 1: setup replication from ap-southeast-2 to ap-southeast-1
+# step 2: delete replication
+# step 3: setup replication from ap-southeast-1 to ap-southeast-1
+
 region: ap-southeast-2
 
 services:
