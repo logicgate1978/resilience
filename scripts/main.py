@@ -450,7 +450,6 @@ def _build_impacted_resource_detail_entry(
             {
                 "label": _short_resource_label(arn, resource.get("label")),
                 "arn": arn,
-                "selection_mode": str(resource.get("selection_mode") or "-"),
             }
         )
     return {
@@ -482,7 +481,6 @@ def _render_impacted_resource_details(details: List[Dict[str, Any]]) -> str:
         for resource in resources:
             lines.append(f"- {resource.get('label') or '-'}")
             lines.append(f"  ARN: {resource.get('arn') or '-'}")
-            lines.append(f"  Selection Mode: {resource.get('selection_mode') or '-'}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
