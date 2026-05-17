@@ -703,6 +703,7 @@ def _build_dry_run_summary_text(
     engine_family: str,
     rows: List[List[str]],
     details: Optional[List[Dict[str, Any]]] = None,
+    account_id: Optional[str] = None,
 ) -> str:
     headers = [
         "No",
@@ -719,6 +720,7 @@ def _build_dry_run_summary_text(
 
     lines = [
         "DRY RUN APPROVAL SUMMARY",
+        f"Account ID: {account_id}" if str(account_id or "").strip() else None,
         f"Manifest: {manifest_path}",
         f"Engine family: {engine_family.upper()}",
         f"Actions: {len(rows)}",
@@ -726,6 +728,7 @@ def _build_dry_run_summary_text(
         "",
         _render_ascii_table(headers, rows),
     ]
+    lines = [line for line in lines if line is not None]
     if details is not None:
         lines.extend(["", _render_impacted_resource_details(details)])
     return "\n".join(lines)
@@ -819,6 +822,7 @@ def main() -> int:
                 engine_family="rollback",
                 rows=dry_run_rows,
                 details=dry_run_details,
+                account_id=args.account_id,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -984,6 +988,7 @@ def main() -> int:
                 engine_family=engine_family,
                 rows=dry_run_rows,
                 details=dry_run_details,
+                account_id=args.account_id,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -1258,6 +1263,7 @@ def main() -> int:
                 engine_family=engine_family,
                 rows=dry_run_rows,
                 details=dry_run_details,
+                account_id=args.account_id,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -1467,6 +1473,7 @@ def main() -> int:
             engine_family=engine_family,
             rows=dry_run_rows,
             details=dry_run_details,
+            account_id=args.account_id,
         )
         dry_run_summary_path = _write_dry_run_summary(
             outdir=args.outdir,
