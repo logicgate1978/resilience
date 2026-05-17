@@ -432,14 +432,70 @@ def _render_ascii_table(headers: List[str], rows: List[List[str]]) -> str:
     return "\n".join(out)
 
 
+def _build_impacted_resource_detail_entry(
+    *,
+    index: int,
+    action_ref: str,
+    engine: str,
+    region: Any,
+    zone: Any,
+    resources: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    detailed_resources: List[Dict[str, str]] = []
+    for resource in resources or []:
+        arn = str(resource.get("arn") or "").strip()
+        if not arn:
+            continue
+        detailed_resources.append(
+            {
+                "label": _short_resource_label(arn, resource.get("label")),
+                "arn": arn,
+                "selection_mode": str(resource.get("selection_mode") or "-"),
+            }
+        )
+    return {
+        "index": index,
+        "action": action_ref,
+        "engine": engine,
+        "region": str(region or "-"),
+        "zone": str(zone or "-"),
+        "resources": detailed_resources,
+    }
+
+
+def _render_impacted_resource_details(details: List[Dict[str, Any]]) -> str:
+    lines = ["IMPACTED RESOURCE DETAILS", ""]
+    if not details:
+        lines.append("No impacted resources were resolved.")
+        return "\n".join(lines)
+
+    for entry in details:
+        lines.append(f"[{entry.get('index')}] {entry.get('action')}")
+        lines.append(
+            f"Engine: {entry.get('engine', '-')} | Region: {entry.get('region', '-')} | Zone: {entry.get('zone', '-')}"
+        )
+        resources = list(entry.get("resources") or [])
+        if not resources:
+            lines.append("- No impacted resources were resolved.")
+            lines.append("")
+            continue
+        for resource in resources:
+            lines.append(f"- {resource.get('label') or '-'}")
+            lines.append(f"  ARN: {resource.get('arn') or '-'}")
+            lines.append(f"  Selection Mode: {resource.get('selection_mode') or '-'}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 def _build_fis_dry_run_rows(
     *,
     manifest: Dict[str, Any],
     payload: Dict[str, Any],
     session,
     default_region: Optional[str],
-) -> List[List[str]]:
+) -> tuple[List[List[str]], List[Dict[str, Any]]]:
     rows: List[List[str]] = []
+    details: List[Dict[str, Any]] = []
     refs = _service_occurrence_refs(manifest)
     services = _manifest_services(manifest)
     actions = payload.get("actions") or {}
@@ -456,14 +512,16 @@ def _build_fis_dry_run_rows(
             session=session,
             default_region=default_region,
         )
+        resolved_region = resolve_service_region(manifest, svc) or "-"
+        resolved_zone = resolve_service_zone(manifest, svc) or "-"
         rows.append(
             [
                 str(index),
                 action_key,
                 "FIS",
                 str(action_obj.get("actionId") or "-"),
-                str(resolve_service_region(manifest, svc) or "-"),
-                str(resolve_service_zone(manifest, svc) or "-"),
+                str(resolved_region),
+                str(resolved_zone),
                 _format_start_after(svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
                 _dry_run_key_parameters_for_service(
@@ -472,7 +530,17 @@ def _build_fis_dry_run_rows(
                 ),
             ]
         )
-    return rows
+        details.append(
+            _build_impacted_resource_detail_entry(
+                index=index,
+                action_ref=action_key,
+                engine="FIS",
+                region=resolved_region,
+                zone=resolved_zone,
+                resources=impacted,
+            )
+        )
+    return rows, details
 
 
 def _custom_exec_type(item: Dict[str, Any]) -> str:
@@ -510,8 +578,9 @@ def _build_custom_dry_run_rows(
     execution_plan: Dict[str, Any],
     session,
     default_region: Optional[str],
-) -> List[List[str]]:
+) -> tuple[List[List[str]], List[Dict[str, Any]]]:
     rows: List[List[str]] = []
+    details: List[Dict[str, Any]] = []
     refs = _service_occurrence_refs(manifest)
     services = _manifest_services(manifest)
     items = list(execution_plan.get("items") or [])
@@ -527,14 +596,16 @@ def _build_custom_dry_run_rows(
                 session=session,
                 default_region=default_region,
             )
+        resolved_region = item.get("region") or resolve_service_region(manifest, svc) or "-"
+        resolved_zone = resolve_service_zone(manifest, svc) or "-"
         rows.append(
             [
                 str(index),
                 refs.get(index) or str(item.get("service") or "-"),
                 "Custom",
                 _custom_exec_type(item),
-                str(item.get("region") or resolve_service_region(manifest, svc) or "-"),
-                str(resolve_service_zone(manifest, svc) or "-"),
+                str(resolved_region),
+                str(resolved_zone),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
                 _dry_run_key_parameters_for_service(
@@ -543,7 +614,17 @@ def _build_custom_dry_run_rows(
                 ),
             ]
         )
-    return rows
+        details.append(
+            _build_impacted_resource_detail_entry(
+                index=index,
+                action_ref=refs.get(index) or str(item.get("service") or "-"),
+                engine="Custom",
+                region=resolved_region,
+                zone=resolved_zone,
+                resources=impacted,
+            )
+        )
+    return rows, details
 
 
 def _build_arc_dry_run_rows(
@@ -552,8 +633,9 @@ def _build_arc_dry_run_rows(
     execution_plan: Dict[str, Any],
     session,
     default_region: Optional[str],
-) -> List[List[str]]:
+) -> tuple[List[List[str]], List[Dict[str, Any]]]:
     rows: List[List[str]] = []
+    details: List[Dict[str, Any]] = []
     refs = _service_occurrence_refs(manifest)
     services = _manifest_services(manifest)
     items = list(execution_plan.get("items") or [])
@@ -576,15 +658,17 @@ def _build_arc_dry_run_rows(
             exec_type = str(item.get("request", {}).get("sdkApi") or item.get("action") or "-")
             region_value = item.get("clientRegion") or item.get("region") or "-"
             params = item.get("request", {}).get("params") or item.get("parameters") or {}
+        resolved_zone = resolve_service_zone(manifest, svc) or "-"
+        action_ref = refs.get(index) or str(item.get("service") or "-")
 
         rows.append(
             [
                 str(index),
-                refs.get(index) or str(item.get("service") or "-"),
+                action_ref,
                 "ARC",
                 exec_type,
                 str(region_value),
-                str(resolve_service_zone(manifest, svc) or "-"),
+                str(resolved_zone),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
                 _dry_run_key_parameters_for_service(
@@ -593,7 +677,17 @@ def _build_arc_dry_run_rows(
                 ),
             ]
         )
-    return rows
+        details.append(
+            _build_impacted_resource_detail_entry(
+                index=index,
+                action_ref=action_ref,
+                engine="ARC",
+                region=region_value,
+                zone=resolved_zone,
+                resources=impacted,
+            )
+        )
+    return rows, details
 
 
 def _build_dry_run_summary_text(
@@ -601,6 +695,7 @@ def _build_dry_run_summary_text(
     manifest_path: str,
     engine_family: str,
     rows: List[List[str]],
+    details: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     headers = [
         "No",
@@ -624,7 +719,29 @@ def _build_dry_run_summary_text(
         "",
         _render_ascii_table(headers, rows),
     ]
+    if details is not None:
+        lines.extend(["", _render_impacted_resource_details(details)])
     return "\n".join(lines)
+
+
+def _build_rollback_dry_run_details(execution_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    details: List[Dict[str, Any]] = []
+    items = list(execution_plan.get("items") or [])
+    for index, item in enumerate(items, start=1):
+        impacted_many = list(item.get("impacted_resources") or [])
+        if not impacted_many and isinstance(item.get("impacted_resource"), dict):
+            impacted_many = [item.get("impacted_resource")]
+        details.append(
+            _build_impacted_resource_detail_entry(
+                index=index,
+                action_ref=str(item.get("actionRef") or item.get("service") or "-"),
+                engine="Rollback",
+                region=item.get("region") or "-",
+                zone=item.get("requestedZone") or "-",
+                resources=impacted_many,
+            )
+        )
+    return details
 
 
 def _write_dry_run_summary(
@@ -688,10 +805,12 @@ def main() -> int:
 
         if args.dry_run:
             dry_run_rows = build_rollback_dry_run_rows(rollback_plan)
+            dry_run_details = _build_rollback_dry_run_details(rollback_plan)
             dry_run_text = _build_dry_run_summary_text(
                 manifest_path=f"rollback:{rollback_run_id}",
                 engine_family="rollback",
                 rows=dry_run_rows,
+                details=dry_run_details,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -846,7 +965,7 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
-            dry_run_rows = _build_arc_dry_run_rows(
+            dry_run_rows, dry_run_details = _build_arc_dry_run_rows(
                 manifest=manifest,
                 execution_plan=execution_plan,
                 session=session,
@@ -856,6 +975,7 @@ def main() -> int:
                 manifest_path=os.path.abspath(args.manifest),
                 engine_family=engine_family,
                 rows=dry_run_rows,
+                details=dry_run_details,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -1119,7 +1239,7 @@ def main() -> int:
             _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
         if args.dry_run:
-            dry_run_rows = _build_custom_dry_run_rows(
+            dry_run_rows, dry_run_details = _build_custom_dry_run_rows(
                 manifest=manifest,
                 execution_plan=execution_plan,
                 session=session,
@@ -1129,6 +1249,7 @@ def main() -> int:
                 manifest_path=os.path.abspath(args.manifest),
                 engine_family=engine_family,
                 rows=dry_run_rows,
+                details=dry_run_details,
             )
             dry_run_summary_path = _write_dry_run_summary(
                 outdir=args.outdir,
@@ -1327,7 +1448,7 @@ def main() -> int:
         _db_safe_call(db_store.replace_artifacts, run_id, artifact_entries)
 
     if args.dry_run:
-        dry_run_rows = _build_fis_dry_run_rows(
+        dry_run_rows, dry_run_details = _build_fis_dry_run_rows(
             manifest=manifest,
             payload=payload,
             session=session,
@@ -1337,6 +1458,7 @@ def main() -> int:
             manifest_path=os.path.abspath(args.manifest),
             engine_family=engine_family,
             rows=dry_run_rows,
+            details=dry_run_details,
         )
         dry_run_summary_path = _write_dry_run_summary(
             outdir=args.outdir,
