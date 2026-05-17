@@ -51,6 +51,24 @@ def _describe_file_system(efs, file_system_id: str) -> Dict[str, Any]:
     return file_systems[0]
 
 
+def _efs_name_tag(efs, file_system_id: str) -> str:
+    try:
+        response = efs.list_tags_for_resource(ResourceId=file_system_id)
+    except Exception:
+        return ""
+    for tag in response.get("Tags") or []:
+        if str(tag.get("Key") or "") == "Name":
+            return str(tag.get("Value") or "").strip()
+    return ""
+
+
+def _efs_display_label(efs, file_system_id: str) -> str:
+    name_tag = _efs_name_tag(efs, file_system_id)
+    if name_tag:
+        return f"{file_system_id} (Name={name_tag})"
+    return file_system_id
+
+
 def _replication_overwrite_protection(fs: Dict[str, Any]) -> str:
     protection = fs.get("FileSystemProtection") or {}
     return str(protection.get("ReplicationOverwriteProtection") or "").strip().upper()
@@ -372,6 +390,11 @@ class EFSFailoverAction(CustomComponentAction):
         efs = session.client("efs", region_name=region)
         _, source_file_system_ids = _resolve_replication_delete_plan(efs, file_system_ids)
 
+        for impacted in impacted_resources:
+            file_system_id = _efs_id_from_arn(str(impacted.get("arn") or ""))
+            if file_system_id:
+                impacted["label"] = _efs_display_label(efs, file_system_id)
+
         return {
             "name": f"a_efs_failover_{index}",
             "engine": "custom",
@@ -615,6 +638,8 @@ class EFSReplicateAction(CustomComponentAction):
         timeout_seconds = int(svc.get("timeout_seconds") or default_timeout_seconds)
         final_sync_grace_seconds = 120
         require_quiesce = False
+        source_efs = session.client("efs", region_name=region)
+        destination_efs = source_efs if destination_region == region else session.client("efs", region_name=destination_region)
         if action_name == "failback-safe":
             params_cfg = svc.get("parameters") or {}
             if not isinstance(params_cfg, dict):
@@ -655,11 +680,13 @@ class EFSReplicateAction(CustomComponentAction):
                     "service": f"efs:{action_name}",
                     "arn": source_arn,
                     "selection_mode": "CUSTOM",
+                    "label": _efs_display_label(source_efs, source_file_system_id),
                 },
                 {
                     "service": f"efs:{action_name}",
                     "arn": destination_arn,
                     "selection_mode": "CUSTOM",
+                    "label": _efs_display_label(destination_efs, destination_resolved_id),
                 },
             ],
         }

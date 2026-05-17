@@ -247,6 +247,7 @@ def collect_custom_impacted_resources(execution_plan: Dict[str, Any]) -> List[Di
                         "service": str(impacted.get("service") or ""),
                         "arn": str(impacted.get("arn") or ""),
                         "selection_mode": str(impacted.get("selection_mode") or "CUSTOM"),
+                        "label": str(impacted.get("label") or ""),
                     }
                 )
         impacted = item.get("impacted_resource")
@@ -256,6 +257,7 @@ def collect_custom_impacted_resources(execution_plan: Dict[str, Any]) -> List[Di
                     "service": str(impacted.get("service") or ""),
                     "arn": str(impacted.get("arn") or ""),
                     "selection_mode": str(impacted.get("selection_mode") or "CUSTOM"),
+                    "label": str(impacted.get("label") or ""),
                 }
             )
     return out

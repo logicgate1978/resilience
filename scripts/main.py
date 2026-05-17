@@ -284,7 +284,10 @@ def _collect_service_impacted_resources(
     )
 
 
-def _short_resource_label(arn: str) -> str:
+def _short_resource_label(arn: str, label: Optional[str] = None) -> str:
+    preferred_label = str(label or "").strip()
+    if preferred_label:
+        return preferred_label
     text = str(arn or "").strip()
     if not text:
         return "-"
@@ -303,7 +306,7 @@ def _short_resource_label(arn: str) -> str:
 def _summarize_impacted_resources(resources: List[Dict[str, Any]]) -> str:
     if not resources:
         return "-"
-    labels = [_short_resource_label(item.get("arn") or "") for item in resources]
+    labels = [_short_resource_label(item.get("arn") or "", item.get("label")) for item in resources]
     labels = [label for label in labels if label]
     if not labels:
         return "-"
