@@ -313,6 +313,14 @@ def _summarize_impacted_resources(resources: List[Dict[str, Any]]) -> str:
         return "-"
     labels = [_short_resource_label(item.get("arn") or "", item.get("label")) for item in resources]
     labels = [label for label in labels if label]
+    deduped_labels: List[str] = []
+    seen = set()
+    for label in labels:
+        if label in seen:
+            continue
+        seen.add(label)
+        deduped_labels.append(label)
+    labels = deduped_labels
     if not labels:
         return "-"
     if len(labels) <= 3:
