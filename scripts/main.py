@@ -439,6 +439,7 @@ def _build_impacted_resource_detail_entry(
     engine: str,
     region: Any,
     zone: Any,
+    key_parameters: str,
     resources: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     detailed_resources: List[Dict[str, str]] = []
@@ -458,6 +459,7 @@ def _build_impacted_resource_detail_entry(
         "engine": engine,
         "region": str(region or "-"),
         "zone": str(zone or "-"),
+        "key_parameters": str(key_parameters or "-"),
         "resources": detailed_resources,
     }
 
@@ -473,6 +475,7 @@ def _render_impacted_resource_details(details: List[Dict[str, Any]]) -> str:
         lines.append(
             f"Engine: {entry.get('engine', '-')} | Region: {entry.get('region', '-')} | Zone: {entry.get('zone', '-')}"
         )
+        lines.append(f"Planned Changes: {entry.get('key_parameters', '-')}")
         resources = list(entry.get("resources") or [])
         if not resources:
             lines.append("- No impacted resources were resolved.")
@@ -512,6 +515,10 @@ def _build_fis_dry_run_rows(
         )
         resolved_region = resolve_service_region(manifest, svc) or "-"
         resolved_zone = resolve_service_zone(manifest, svc) or "-"
+        key_parameters = _dry_run_key_parameters_for_service(
+            svc=svc,
+            fallback=action_obj.get("parameters") or {},
+        )
         rows.append(
             [
                 str(index),
@@ -522,10 +529,7 @@ def _build_fis_dry_run_rows(
                 str(resolved_zone),
                 _format_start_after(svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _dry_run_key_parameters_for_service(
-                    svc=svc,
-                    fallback=action_obj.get("parameters") or {},
-                ),
+                key_parameters,
             ]
         )
         details.append(
@@ -535,6 +539,7 @@ def _build_fis_dry_run_rows(
                 engine="FIS",
                 region=resolved_region,
                 zone=resolved_zone,
+                key_parameters=key_parameters,
                 resources=impacted,
             )
         )
@@ -596,6 +601,10 @@ def _build_custom_dry_run_rows(
             )
         resolved_region = item.get("region") or resolve_service_region(manifest, svc) or "-"
         resolved_zone = resolve_service_zone(manifest, svc) or "-"
+        key_parameters = _dry_run_key_parameters_for_service(
+            svc=svc,
+            fallback=item.get("parameters") or {},
+        )
         rows.append(
             [
                 str(index),
@@ -606,10 +615,7 @@ def _build_custom_dry_run_rows(
                 str(resolved_zone),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _dry_run_key_parameters_for_service(
-                    svc=svc,
-                    fallback=item.get("parameters") or {},
-                ),
+                key_parameters,
             ]
         )
         details.append(
@@ -619,6 +625,7 @@ def _build_custom_dry_run_rows(
                 engine="Custom",
                 region=resolved_region,
                 zone=resolved_zone,
+                key_parameters=key_parameters,
                 resources=impacted,
             )
         )
@@ -658,6 +665,10 @@ def _build_arc_dry_run_rows(
             params = item.get("request", {}).get("params") or item.get("parameters") or {}
         resolved_zone = resolve_service_zone(manifest, svc) or "-"
         action_ref = refs.get(index) or str(item.get("service") or "-")
+        key_parameters = _dry_run_key_parameters_for_service(
+            svc=svc,
+            fallback=params,
+        )
 
         rows.append(
             [
@@ -669,10 +680,7 @@ def _build_arc_dry_run_rows(
                 str(resolved_zone),
                 _format_start_after(item.get("startAfter") or svc.get("start_after")),
                 _summarize_impacted_resources(impacted),
-                _dry_run_key_parameters_for_service(
-                    svc=svc,
-                    fallback=params,
-                ),
+                key_parameters,
             ]
         )
         details.append(
@@ -682,6 +690,7 @@ def _build_arc_dry_run_rows(
                 engine="ARC",
                 region=region_value,
                 zone=resolved_zone,
+                key_parameters=key_parameters,
                 resources=impacted,
             )
         )
@@ -736,6 +745,7 @@ def _build_rollback_dry_run_details(execution_plan: Dict[str, Any]) -> List[Dict
                 engine="Rollback",
                 region=item.get("region") or "-",
                 zone=item.get("requestedZone") or "-",
+                key_parameters=_format_key_parameters(item),
                 resources=impacted_many,
             )
         )
