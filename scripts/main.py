@@ -297,7 +297,12 @@ def _short_resource_label(arn: str, label: Optional[str] = None) -> str:
         if ":" in text:
             return text.rsplit(":", 1)[-1]
     if text.startswith("route53://"):
-        return text.replace("route53://", "", 1)
+        route53_ref = text.replace("route53://", "", 1)
+        parts = route53_ref.split("/")
+        if len(parts) >= 2:
+            record_name = parts[1].split("#", 1)[0].rstrip(".")
+            return record_name or route53_ref
+        return route53_ref
     if text.startswith("eks://"):
         return text.replace("eks://", "", 1)
     return text
