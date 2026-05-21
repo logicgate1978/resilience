@@ -405,8 +405,12 @@ class PostgresRunStore:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT environment
-                FROM account_environments
+                SELECT
+                CASE
+                  WHEN environment='production' then 'PROD'
+                  ELSE 'DEV'
+                END AS environment
+                FROM resilience.account_environments
                 WHERE accountid = %s
                 """,
                 (account_id_text,),
