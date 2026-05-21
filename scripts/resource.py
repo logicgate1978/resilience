@@ -343,8 +343,7 @@ def _collect_efs_file_systems(
             actual_tags: Dict[str, str] = {}
             if tags:
                 try:
-                    tag_resp = efs.list_tags_for_resource(ResourceId=file_system_id)
-                    actual_tags = {t["Key"]: t.get("Value", "") for t in tag_resp.get("Tags", []) if "Key" in t}
+                    actual_tags = {t["Key"]: t.get("Value", "") for t in fs.get("Tags", []) if "Key" in t}
                 except Exception:
                     continue
                 if not _tags_match(tags, actual_tags):

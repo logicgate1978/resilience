@@ -398,6 +398,25 @@ class PostgresRunStore:
     def _connect(self):
         return self._psycopg.connect(self._dsn)
 
+    def fetch_account_environment(self, account_id: str) -> Optional[str]:
+        account_id_text = str(account_id or "").strip()
+        if not account_id_text:
+            return None
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT environment
+                FROM account_environments
+                WHERE accountid = %s
+                """,
+                (account_id_text,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        value = row[0]
+        return str(value).strip() if value is not None else None
+
     def create_run(
         self,
         *,

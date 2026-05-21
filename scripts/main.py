@@ -189,8 +189,12 @@ def _get_report_filename(base_name: str) -> str:
 
 
 def _create_runtime_session(args, region: Optional[str]):
-    if args.account_id and args.username and args.password:
-        return AccessController(args.account_id, region, 'PubCloud_NonProd_Admin', args.username, args.password).getServiceSession()
+    if args.account_id and args.username and args.password and args.environment:
+        if str(args.environment).strip().upper() == 'PROD':
+            role = 'PubCloud_Prod_Admin'
+        else:
+            role = 'PubCloud_NonProd_Admin'
+        return AccessController(args.account_id, region, role, args.username, args.password).getServiceSession()
     return boto3.Session(region_name=region)
 
 
@@ -208,6 +212,33 @@ def _db_safe_call(fn, *args, **kwargs):
     except Exception as e:
         log_message("WARN", f"Database persistence error: {e}")
         return None
+
+
+def _validate_account_environment_or_raise(*, db_store, account_id: Optional[str], environment: Optional[str]) -> None:
+    account_id_text = str(account_id or "").strip()
+    environment_text = str(environment or "").strip()
+    if db_store is None or not account_id_text or not environment_text:
+        return
+
+    log_message(
+        "INFO",
+        f"Validating account/environment mapping from database for account_id={account_id_text}, environment={environment_text}.",
+    )
+    db_environment = db_store.fetch_account_environment(account_id_text)
+    if not db_environment:
+        raise ValueError(
+            f"Account/environment validation failed: no environment mapping was found for account_id {account_id_text}."
+        )
+    if db_environment.strip().upper() != environment_text.upper():
+        raise ValueError(
+            "Account/environment validation failed: "
+            f"account_id {account_id_text} is mapped to environment '{db_environment}', "
+            f"but the requested environment was '{environment_text}'."
+        )
+    log_message(
+        "OK",
+        f"Account/environment validation passed for account_id={account_id_text}, environment={environment_text}.",
+    )
 
 
 def _artifact_entry(
@@ -774,11 +805,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "main.yml")), help="Path to manifest.yml")
     ap.add_argument("--account-id", default=_env_value(env_defaults, "ACCOUNT_ID", None), help="AWS Account ID to run the experiment in")
+    ap.add_argument("--environment", default=_env_value(env_defaults, "ENVIRONMENT", None), help="Environment of the account")
     ap.add_argument("--username", default=_env_value(env_defaults, "USERNAME", None), help="Username of the service account")
     ap.add_argument("--password", help="Password of the service account")
     ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", None), help="FIS IAM role ARN (required unless --dry-run)")
     ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", None), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
-    ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
+    ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.environ.get("artifactPath") or os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
     ap.add_argument("--db-dsn", default=_env_value(env_defaults, "DB_DSN", _env_value(env_defaults, "DATABASE_URL", "")), help="Optional PostgreSQL DSN for persisting run metadata and artifacts")
     ap.add_argument("--rollback-run-id", default="", help="Rollback a previous run by run_id using stored rollback metadata in PostgreSQL")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
@@ -859,6 +891,15 @@ def main() -> int:
         return 0 if str(summary.get("status") or "").lower() == "completed" else 1
 
     manifest = load_manifest(args.manifest)
+    try:
+        _validate_account_environment_or_raise(
+            db_store=db_store,
+            account_id=args.account_id,
+            environment=args.environment,
+        )
+    except ValueError as e:
+        print(f"[ERROR] {e}", flush=True)
+        return 1
     engine_family = _resolve_manifest_engine_family(manifest)
     manifest_skip_validation = manifest_skip_validation_enabled(manifest)
     global_skip_validation = bool(args.skip_validation or manifest_skip_validation)
