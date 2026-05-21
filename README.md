@@ -88,7 +88,7 @@ Responsibilities:
 - starts observability
 - executes and polls the selected control plane
 - triggers HTML report generation
-- optionally persists run metadata, actions, artifacts, validations, and metrics into PostgreSQL when `--db-dsn` is configured
+- optionally persists run metadata, actions, artifacts, validations, and metrics into PostgreSQL when `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are set in the OS environment
 
 ### Database Persistence
 
@@ -1630,7 +1630,11 @@ python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-rol
 To persist the run into PostgreSQL at the same time:
 
 ```powershell
-python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn> --db-dsn "host=<host> dbname=<db> user=<user> password=<password> sslmode=require"
+$env:DB_HOST = "<host>"
+$env:DB_NAME = "<db>"
+$env:DB_USER = "<user>"
+$env:DB_PASSWORD = "<password>"
+python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
 ```
 
 To bypass pre-execution validations for a one-off run:

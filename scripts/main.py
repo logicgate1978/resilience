@@ -256,15 +256,34 @@ def _artifact_entry(
     }
 
 
-def _mask_db_dsn(dsn: str) -> str:
-    text = str(dsn or "").strip()
-    if not text:
+def _db_env_config_or_raise() -> Dict[str, str]:
+    values = {
+        "DB_HOST": str(os.environ.get("DB_HOST") or "").strip(),
+        "DB_NAME": str(os.environ.get("DB_NAME") or "").strip(),
+        "DB_USER": str(os.environ.get("DB_USER") or "").strip(),
+        "DB_PASSWORD": str(os.environ.get("DB_PASSWORD") or "").strip(),
+    }
+    provided = [key for key, value in values.items() if value]
+    if not provided:
+        return {}
+    missing = [key for key, value in values.items() if not value]
+    if missing:
+        raise ValueError(
+            "Database persistence configuration is incomplete. "
+            f"Missing required OS environment variables: {', '.join(missing)}."
+        )
+    return values
+
+
+def _masked_db_env_summary(config: Dict[str, str]) -> str:
+    if not config:
         return ""
-    masked = text
-    masked = masked.replace("\n", " ").replace("\r", " ")
-    masked = __import__("re").sub(r"(password\s*=\s*)([^ ]+)", r"\1***", masked, flags=__import__("re").IGNORECASE)
-    masked = __import__("re").sub(r"(postgres(?:ql)?://[^:\s]+:)([^@/\s]+)(@)", r"\1***\3", masked, flags=__import__("re").IGNORECASE)
-    return masked
+    return (
+        f"host={config.get('DB_HOST')} "
+        f"dbname={config.get('DB_NAME')} "
+        f"user={config.get('DB_USER')} "
+        "password=***"
+    )
 
 
 def _db_run_status(value: Any) -> str:
@@ -811,7 +830,6 @@ def main() -> int:
     ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", None), help="FIS IAM role ARN (required unless --dry-run)")
     ap.add_argument("--arc-role-arn", default=_env_value(env_defaults, "ARC_ROLE_ARN", None), help="ARC Region switch execution role ARN (required for region tests unless --dry-run)")
     ap.add_argument("--outdir", default=_env_path(env_defaults, "OUTDIR", os.environ.get("artifactPath") or os.path.join("scripts", "fis_out")), help="Output directory for template/results JSON/CSVs")
-    ap.add_argument("--db-dsn", default=_env_value(env_defaults, "DB_DSN", _env_value(env_defaults, "DATABASE_URL", "")), help="Optional PostgreSQL DSN for persisting run metadata and artifacts")
     ap.add_argument("--rollback-run-id", default="", help="Rollback a previous run by run_id using stored rollback metadata in PostgreSQL")
     ap.add_argument("--dry-run", action="store_true", help="Generate JSON only; do not create or execute")
     ap.add_argument("--skip-validation", action="store_true", help="Skip pre-execution action validation and continue directly to planning/execution")
@@ -820,16 +838,23 @@ def main() -> int:
     ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
     ensure_dir(args.outdir)
-    if str(args.db_dsn or "").strip():
-        log_message("INFO", f"Database persistence requested: {_mask_db_dsn(args.db_dsn)}")
+    db_env_config = _db_env_config_or_raise()
+    if db_env_config:
+        log_message("INFO", f"Database persistence requested: {_masked_db_env_summary(db_env_config)}")
     else:
-        log_message("INFO", "Database persistence disabled: no DB_DSN / DATABASE_URL / --db-dsn provided.")
-    db_store = _db_safe_call(PostgresRunStore.from_dsn, args.db_dsn)
+        log_message("INFO", "Database persistence disabled: DB_HOST / DB_NAME / DB_USER / DB_PASSWORD are not set.")
+    db_store = _db_safe_call(
+        PostgresRunStore.from_env,
+        host=db_env_config.get("DB_HOST"),
+        dbname=db_env_config.get("DB_NAME"),
+        user=db_env_config.get("DB_USER"),
+        password=db_env_config.get("DB_PASSWORD"),
+    )
     rollback_run_id = str(args.rollback_run_id or "").strip()
 
     if rollback_run_id:
         if db_store is None:
-            raise ValueError("--rollback-run-id requires --db-dsn or DB_DSN / DATABASE_URL so rollback metadata can be loaded.")
+            raise ValueError("--rollback-run-id requires DB_HOST / DB_NAME / DB_USER / DB_PASSWORD so rollback metadata can be loaded.")
         if args.skip_validation:
             log_message("WARN", "--skip-validation has no effect for rollback execution and will be ignored.")
 

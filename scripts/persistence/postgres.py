@@ -376,27 +376,47 @@ def _extract_rollback_state(
 
 
 class PostgresRunStore:
-    def __init__(self, dsn: str):
+    def __init__(self, *, host: str, dbname: str, user: str, password: str):
         try:
             import psycopg
             from psycopg.types.json import Jsonb
         except Exception as e:
             raise RuntimeError(
-                "Database persistence requires psycopg. Install it with the project requirements before using --db-dsn."
+                "Database persistence requires psycopg. Install it with the project requirements before using DB_HOST / DB_NAME / DB_USER / DB_PASSWORD."
             ) from e
         self._psycopg = psycopg
         self._Jsonb = Jsonb
-        self._dsn = dsn
+        self._connect_kwargs = {
+            "host": host,
+            "dbname": dbname,
+            "user": user,
+            "password": password,
+        }
 
     @classmethod
-    def from_dsn(cls, dsn: Optional[str]) -> Optional["PostgresRunStore"]:
-        text = str(dsn or "").strip()
-        if not text:
+    def from_env(
+        cls,
+        *,
+        host: Optional[str],
+        dbname: Optional[str],
+        user: Optional[str],
+        password: Optional[str],
+    ) -> Optional["PostgresRunStore"]:
+        host_text = str(host or "").strip()
+        dbname_text = str(dbname or "").strip()
+        user_text = str(user or "").strip()
+        password_text = str(password or "").strip()
+        if not (host_text and dbname_text and user_text and password_text):
             return None
-        return cls(text)
+        return cls(
+            host=host_text,
+            dbname=dbname_text,
+            user=user_text,
+            password=password_text,
+        )
 
     def _connect(self):
-        return self._psycopg.connect(self._dsn)
+        return self._psycopg.connect(**self._connect_kwargs)
 
     def fetch_account_environment(self, account_id: str) -> Optional[str]:
         account_id_text = str(account_id or "").strip()
