@@ -241,6 +241,33 @@ def _validate_account_environment_or_raise(*, db_store, account_id: Optional[str
     )
 
 
+def _validate_account_itam_or_raise(*, db_store, account_id: Optional[str], itam: Optional[str]) -> None:
+    account_id_text = str(account_id or "").strip()
+    itam_text = str(itam or "").strip()
+    if db_store is None or not account_id_text or not itam_text:
+        return
+
+    log_message(
+        "INFO",
+        f"Validating account/ITAM mapping from database for account_id={account_id_text}, itam={itam_text}.",
+    )
+    db_app_id = db_store.fetch_account_app_id(account_id_text)
+    if not db_app_id:
+        raise ValueError(
+            f"Account/ITAM validation failed: no app_id mapping was found for account_id {account_id_text}."
+        )
+    if db_app_id.strip().upper() != itam_text.upper():
+        raise ValueError(
+            "Account/ITAM validation failed: "
+            f"account_id {account_id_text} is mapped to app_id '{db_app_id}', "
+            f"but the requested ITAM was '{itam_text}'."
+        )
+    log_message(
+        "OK",
+        f"Account/ITAM validation passed for account_id={account_id_text}, itam={itam_text}.",
+    )
+
+
 def _artifact_entry(
     artifact_type: str,
     *,
@@ -844,6 +871,7 @@ def main() -> int:
     ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "main.yml")), help="Path to manifest.yml")
     ap.add_argument("--account-id", default=_env_value(env_defaults, "ACCOUNT_ID", None), help="AWS Account ID to run the experiment in")
     ap.add_argument("--environment", default=_env_value(env_defaults, "ENVIRONMENT", None), help="Environment of the account")
+    ap.add_argument("--ITAM", dest="itam", default=_env_value(env_defaults, "ITAM", None), help="ITAM/application ID for account validation")
     ap.add_argument("--username", default=_env_value(env_defaults, "USERNAME", None), help="Username of the service account")
     ap.add_argument("--password", help="Password of the service account")
     ap.add_argument("--fis-role-arn", default=_env_value(env_defaults, "FIS_ROLE_ARN", None), help="FIS IAM role ARN (required unless --dry-run)")
@@ -930,6 +958,11 @@ def main() -> int:
     else:
         db_store = _db_store_from_env()
     try:
+        _validate_account_itam_or_raise(
+            db_store=db_store,
+            account_id=args.account_id,
+            itam=args.itam,
+        )
         _validate_account_environment_or_raise(
             db_store=db_store,
             account_id=args.account_id,

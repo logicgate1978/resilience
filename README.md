@@ -1640,6 +1640,8 @@ python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-rol
 
 Set top-level `enable_db: false` in a manifest to force PostgreSQL persistence off for that run, regardless of those environment variables.
 
+When DB persistence is enabled, passing `--account-id` with `--ITAM` validates the account against `resilience.account_environments.app_id`; passing `--account-id` with `--environment` validates the account against `resilience.account_environments.environment`. These DB-backed validations are skipped when DB persistence is disabled.
+
 To bypass pre-execution validations for a one-off run:
 
 ```powershell
