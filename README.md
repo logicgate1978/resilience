@@ -612,6 +612,7 @@ This section is split into:
 | `zone` | Optional default | Default Availability Zone scope. `service.zone` overrides it. |
 | `primary_region` | Optional default | Default active Region for Aurora Global Database actions. `service.primary_region` overrides it. |
 | `secondary_region` | Optional default | Default standby Region for Aurora Global Database actions. `service.secondary_region` overrides it. |
+| `enable_db` | No | When set to `false`, disables PostgreSQL persistence for this manifest even if `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are present. When omitted or set to any value other than false, persistence is controlled by those four OS environment variables. |
 | `services` | Yes | List of service/action blocks to execute. |
 | `observability` | No | Optional health-check and CloudWatch configuration around the experiment window. |
 
@@ -1636,6 +1637,8 @@ $env:DB_USER = "<user>"
 $env:DB_PASSWORD = "<password>"
 python main.py --manifest ..\manifests\component-ec2.yml --fis-role-arn <fis-role-arn>
 ```
+
+Set top-level `enable_db: false` in a manifest to force PostgreSQL persistence off for that run, regardless of those environment variables.
 
 To bypass pre-execution validations for a one-off run:
 

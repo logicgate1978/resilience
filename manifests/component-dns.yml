@@ -1,3 +1,5 @@
+enable_db: false
+
 services:
 - name: dns
   action: set-value

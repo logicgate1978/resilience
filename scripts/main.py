@@ -286,6 +286,25 @@ def _masked_db_env_summary(config: Dict[str, str]) -> str:
     )
 
 
+def _db_store_from_env():
+    db_env_config = _db_env_config_or_raise()
+    if db_env_config:
+        log_message("INFO", f"Database persistence requested: {_masked_db_env_summary(db_env_config)}")
+    else:
+        log_message("INFO", "Database persistence disabled: DB_HOST / DB_NAME / DB_USER / DB_PASSWORD are not set.")
+    return _db_safe_call(
+        PostgresRunStore.from_env,
+        host=db_env_config.get("DB_HOST"),
+        dbname=db_env_config.get("DB_NAME"),
+        user=db_env_config.get("DB_USER"),
+        password=db_env_config.get("DB_PASSWORD"),
+    )
+
+
+def _manifest_db_disabled(manifest: Dict[str, Any]) -> bool:
+    return coerce_bool((manifest or {}).get("enable_db"), True) is False
+
+
 def _db_run_status(value: Any) -> str:
     text = str(value or "").strip().lower()
     if text in {"completed", "failed", "stopped", "skipped", "running"}:
@@ -838,21 +857,11 @@ def main() -> int:
     ap.add_argument("--upload-artifactory", default=parse_bool(env_defaults.get("UPLOAD_ARTIFACTORY"), False), action="store_true", help="Upload generated HTML report to Artifactory")
     args = ap.parse_args()
     ensure_dir(args.outdir)
-    db_env_config = _db_env_config_or_raise()
-    if db_env_config:
-        log_message("INFO", f"Database persistence requested: {_masked_db_env_summary(db_env_config)}")
-    else:
-        log_message("INFO", "Database persistence disabled: DB_HOST / DB_NAME / DB_USER / DB_PASSWORD are not set.")
-    db_store = _db_safe_call(
-        PostgresRunStore.from_env,
-        host=db_env_config.get("DB_HOST"),
-        dbname=db_env_config.get("DB_NAME"),
-        user=db_env_config.get("DB_USER"),
-        password=db_env_config.get("DB_PASSWORD"),
-    )
     rollback_run_id = str(args.rollback_run_id or "").strip()
+    db_store = None
 
     if rollback_run_id:
+        db_store = _db_store_from_env()
         if db_store is None:
             raise ValueError("--rollback-run-id requires DB_HOST / DB_NAME / DB_USER / DB_PASSWORD so rollback metadata can be loaded.")
         if args.skip_validation:
@@ -916,6 +925,10 @@ def main() -> int:
         return 0 if str(summary.get("status") or "").lower() == "completed" else 1
 
     manifest = load_manifest(args.manifest)
+    if _manifest_db_disabled(manifest):
+        log_message("INFO", "Database persistence disabled: manifest enable_db is false.")
+    else:
+        db_store = _db_store_from_env()
     try:
         _validate_account_environment_or_raise(
             db_store=db_store,
