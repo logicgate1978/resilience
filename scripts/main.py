@@ -7,22 +7,22 @@ from typing import Any, Dict, List, Optional
 import boto3
 import botocore
 
-from component_actions import (
+from providers.aws.engines.custom import (
     build_custom_execution_plan,
     collect_custom_impacted_resources,
     execute_custom_plan,
     service_uses_custom_engine,
 )
-from fis_template_generator import create_template, generate_template_payload
-from observability import parse_observability, start_observability_collectors
+from providers.aws.engines.fis import create_template, generate_template_payload
+from providers.aws.observability import parse_observability, start_observability_collectors
 from persistence import PostgresRunStore
-from region_switch import (
+from providers.aws.engines.arc import (
     build_execution_plan,
     execute_region_plan,
     resolve_region_targets,
     validate_region_manifest,
 )
-from rollback import (
+from providers.aws.rollback import (
     build_rollback_dry_run_rows,
     build_rollback_execution_plan,
     execute_rollback_plan,
@@ -32,7 +32,7 @@ from providers.azure import (
     build_azure_dry_run_rows,
     collect_azure_impacted_resources,
 )
-from resource import collect_impacted_resources
+from providers.aws.resource import collect_impacted_resources
 from utility import (
     coerce_bool,
     ensure_dir,
@@ -47,8 +47,11 @@ from utility import (
     resolve_service_zone,
     upload_files_to_artifactory,
 )
-from validations import ValidationError, validate_manifest_services
-from validations.registry import manifest_skip_validation_enabled
+from providers.aws.validations import (
+    ValidationError,
+    manifest_skip_validation_enabled,
+    validate_manifest_services,
+)
 
 from chart import generate_report
 from auth import AccessController
