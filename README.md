@@ -1,12 +1,19 @@
 # Resilience Testing Framework
 
-This repository contains a manifest-driven resilience testing framework for AWS workloads.
+This repository contains a manifest-driven resilience testing framework for AWS workloads, with an Azure provider path being introduced for Azure Chaos Studio planning.
 
-It currently supports three execution models:
+For AWS, it currently supports three execution models:
 
 1. AWS Fault Injection Service (FIS) for native FIS-backed actions
 2. AWS ARC Region switch for Aurora Global Database failover and switchover when `service.use_arc: true`
 3. Custom actions for behaviors that are not available as native FIS actions, or for supported `use_fis: false` / `use_arc: false` fallbacks
+
+For Azure, the framework now supports an isolated provider path for dry-run planning with:
+
+1. Azure Chaos Studio (`engine: chaos_studio`)
+2. Azure custom actions (`engine: custom`, scaffolded for future implementation)
+
+Existing manifests that omit `provider` continue to run as AWS manifests.
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 
@@ -608,10 +615,14 @@ This section is split into:
 
 | Field | Required | Description |
 | --- | --- | --- |
+| `provider` | No | Cloud provider for the manifest. Defaults to `aws` for backward compatibility. Use `azure` for Azure Chaos Studio dry-run planning. |
 | `region` | Optional default | Default AWS Region for execution, resource discovery, and observability. `service.region` overrides it. For `s3:failover`, this is the MRAP failover-control Region and defaults to `eu-west-1` when omitted. |
 | `zone` | Optional default | Default Availability Zone scope. `service.zone` overrides it. |
 | `primary_region` | Optional default | Default active Region for Aurora Global Database actions. `service.primary_region` overrides it. |
 | `secondary_region` | Optional default | Default standby Region for Aurora Global Database actions. `service.secondary_region` overrides it. |
+| `subscription_id` | Required for Azure | Azure subscription ID for `provider: azure` manifests. It can also be supplied with `--subscription-id`. |
+| `resource_group` | Optional Azure default | Default Azure resource group for Azure service blocks. `service.resource_group` or `service.target.resource_group` overrides it. |
+| `location` | Optional Azure default | Default Azure location for Azure service blocks. `service.location` or `service.target.location` overrides it. |
 | `enable_db` | No | When set to `false`, disables PostgreSQL persistence for this manifest even if `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are present. When omitted or set to any value other than false, persistence is controlled by those four OS environment variables. |
 | `services` | Yes | List of service/action blocks to execute. |
 | `observability` | No | Optional health-check and CloudWatch configuration around the experiment window. |
@@ -1655,6 +1666,18 @@ From `scripts/`:
 ```powershell
 python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 ```
+
+### Plan an Azure Chaos Studio Test
+
+Azure support is currently implemented as an isolated provider path for dry-run approval planning. Real Azure Chaos Studio execution is intentionally blocked until the Azure execution adapter and credential flow are enabled.
+
+Example:
+
+```powershell
+python main.py --manifest ..\manifests\azure-chaos-studio-dry-run.yml --dry-run
+```
+
+Azure manifests use `provider: azure` and `engine: chaos_studio`. Existing AWS manifests do not need a `provider` field because they default to `aws`.
 
 ### Dry Run
 

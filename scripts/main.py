@@ -27,6 +27,11 @@ from rollback import (
     build_rollback_execution_plan,
     execute_rollback_plan,
 )
+from providers.azure import (
+    build_azure_execution_plan,
+    build_azure_dry_run_rows,
+    collect_azure_impacted_resources,
+)
 from resource import collect_impacted_resources
 from utility import (
     coerce_bool,
@@ -82,6 +87,13 @@ def _manifest_services(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
     if not isinstance(services, list) or not services:
         raise ValueError("Top-level 'services' must be a non-empty list.")
     return [svc for svc in services if isinstance(svc, dict)]
+
+
+def _resolve_manifest_provider(manifest: Dict[str, Any]) -> str:
+    provider = str((manifest or {}).get("provider") or "aws").strip().lower()
+    if provider not in {"aws", "azure"}:
+        raise ValueError(f"Unsupported provider '{provider}'. Supported providers: aws, azure.")
+    return provider
 
 
 def _service_engine_family(svc: Dict[str, Any]) -> str:
@@ -330,6 +342,12 @@ def _db_store_from_env():
 
 def _manifest_db_disabled(manifest: Dict[str, Any]) -> bool:
     return coerce_bool((manifest or {}).get("enable_db"), True) is False
+
+
+def _control_account_id_for_provider(args, provider: str) -> Optional[str]:
+    if provider == "azure":
+        return str(args.subscription_id or args.account_id or "").strip() or None
+    return str(args.account_id or "").strip() or None
 
 
 def _db_run_status(value: Any) -> str:
@@ -870,6 +888,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest", default=_env_path(env_defaults, "MANIFEST", os.path.join("manifests", "main.yml")), help="Path to manifest.yml")
     ap.add_argument("--account-id", default=_env_value(env_defaults, "ACCOUNT_ID", None), help="AWS Account ID to run the experiment in")
+    ap.add_argument("--subscription-id", default=_env_value(env_defaults, "SUBSCRIPTION_ID", None), help="Azure subscription ID to run the experiment in")
     ap.add_argument("--environment", default=_env_value(env_defaults, "ENVIRONMENT", None), help="Environment of the account")
     ap.add_argument("--ITAM", dest="itam", default=_env_value(env_defaults, "ITAM", None), help="ITAM/application ID for account validation")
     ap.add_argument("--username", default=_env_value(env_defaults, "USERNAME", None), help="Username of the service account")
@@ -953,6 +972,8 @@ def main() -> int:
         return 0 if str(summary.get("status") or "").lower() == "completed" else 1
 
     manifest = load_manifest(args.manifest)
+    provider = _resolve_manifest_provider(manifest)
+    control_account_id = _control_account_id_for_provider(args, provider)
     if _manifest_db_disabled(manifest):
         log_message("INFO", "Database persistence disabled: manifest enable_db is false.")
     else:
@@ -960,17 +981,71 @@ def main() -> int:
     try:
         _validate_account_itam_or_raise(
             db_store=db_store,
-            account_id=args.account_id,
+            account_id=control_account_id,
             itam=args.itam,
         )
         _validate_account_environment_or_raise(
             db_store=db_store,
-            account_id=args.account_id,
+            account_id=control_account_id,
             environment=args.environment,
         )
     except ValueError as e:
         print(f"[ERROR] {e}", flush=True)
         return 1
+
+    if provider == "azure":
+        execution_plan = build_azure_execution_plan(
+            manifest,
+            subscription_id=args.subscription_id,
+            default_timeout_seconds=args.timeout_seconds,
+        )
+        plan_name = execution_plan["name"]
+        execution_plan_path = os.path.join(args.outdir, f"azure_execution_plan_{plan_name}.json")
+        with open(execution_plan_path, "w", encoding="utf-8") as f:
+            f.write(pretty(execution_plan))
+        log_message("OK", f"Wrote Azure execution plan JSON: {execution_plan_path}")
+
+        artifact_entries: List[Dict[str, Any]] = [
+            _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest),
+            _artifact_entry("other", local_path=execution_plan_path, content_json=execution_plan),
+        ]
+        impacted_resources = collect_azure_impacted_resources(execution_plan)
+        impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
+        with open(impacted_resources_path, "w", encoding="utf-8") as f:
+            f.write(pretty({"impacted_resources": impacted_resources}))
+        log_message("OK", f"Wrote impacted resources JSON: {impacted_resources_path}")
+        artifact_entries.append(
+            _artifact_entry(
+                "impacted_resources",
+                local_path=impacted_resources_path,
+                content_json={"impacted_resources": impacted_resources},
+            )
+        )
+
+        if args.dry_run:
+            dry_run_rows, dry_run_details = build_azure_dry_run_rows(execution_plan)
+            dry_run_text = _build_dry_run_summary_text(
+                manifest_path=os.path.abspath(args.manifest),
+                engine_family=str(execution_plan.get("engineFamily") or "azure"),
+                rows=dry_run_rows,
+                details=dry_run_details,
+                account_id=control_account_id,
+            )
+            dry_run_summary_path = _write_dry_run_summary(
+                outdir=args.outdir,
+                name=plan_name,
+                text=dry_run_text,
+            )
+            print(dry_run_text, flush=True)
+            log_message("OK", f"Wrote dry-run approval summary: {dry_run_summary_path}")
+            artifact_entries.append(_artifact_entry("other", local_path=dry_run_summary_path))
+            log_message("INFO", "Dry-run enabled: skipping Azure create/execute.")
+            return 0
+
+        raise ValueError(
+            "Azure execution is not enabled yet. Run with --dry-run to generate the Azure Chaos Studio approval plan."
+        )
+
     engine_family = _resolve_manifest_engine_family(manifest)
     manifest_skip_validation = manifest_skip_validation_enabled(manifest)
     global_skip_validation = bool(args.skip_validation or manifest_skip_validation)

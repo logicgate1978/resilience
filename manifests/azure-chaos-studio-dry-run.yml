@@ -1,0 +1,14 @@
+provider: azure
+engine: chaos_studio
+enable_db: false
+subscription_id: 00000000-0000-0000-0000-000000000000
+resource_group: example-rg
+location: southeastasia
+
+services:
+- name: vm
+  action: stop
+  target:
+    resource_id: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/example-rg/providers/Microsoft.Compute/virtualMachines/example-vm
+  parameters:
+    duration: PT5M

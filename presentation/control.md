@@ -2,12 +2,12 @@
 
 ## Purpose
 
-This document explains the key controls implemented around the resilience automation tool. The tool is used by application teams to run controlled resilience tests against AWS resources through the bank's Azure DevOps (ADO) pipeline.
+This document explains the key controls implemented around the resilience automation tool. The tool is used by application teams to run controlled resilience tests against cloud resources through the bank's Azure DevOps (ADO) pipeline.
 
 The controls are designed to make sure that:
 
-- application teams can only operate AWS accounts that belong to their own application;
-- the environment selected in the pipeline matches the actual environment of the AWS account;
+- application teams can only operate AWS accounts or Azure subscriptions that belong to their own application;
+- the environment selected in the pipeline matches the actual environment of the AWS account or Azure subscription;
 - resilience tests are reviewed before execution;
 - the proposed changes are visible to the approving Production Service Support (PSS) team member;
 - execution evidence is retained through generated artifacts and ADO pipeline artifacts.
@@ -31,7 +31,7 @@ The dry-run plan shows:
 - the actions that will be performed;
 - the execution engine used for each action;
 - the order of execution, including any dependencies;
-- the AWS resources that may be impacted;
+- the cloud resources that may be impacted;
 - the planned changes or key parameters for each action.
 
 Step 2: PSS review and approval
@@ -58,19 +58,19 @@ The dry-run execution produces an approval artifact containing the execution pla
 
 The ADO approval record provides evidence of who approved the run and when approval was given.
 
-## Control 2: ITAM and AWS Account ID Validation
+## Control 2: ITAM and Cloud Account Validation
 
 ### Control Objective
 
-An application team must only be able to run resilience tests against AWS accounts that belong to its own application.
+An application team must only be able to run resilience tests against cloud accounts or subscriptions that belong to its own application.
 
-For example, ITAM `50705` must not be allowed to run resilience tests against AWS accounts owned by ITAM `14147`.
+For example, ITAM `50705` must not be allowed to run resilience tests against AWS accounts or Azure subscriptions owned by ITAM `14147`.
 
 ### How the Control Works
 
-When database controls are enabled, the tool validates the relationship between the ITAM value and the AWS account ID before the resilience test proceeds.
+When database controls are enabled, the tool validates the relationship between the ITAM value and the target cloud account or subscription before the resilience test proceeds.
 
-The ADO pipeline passes the ITAM and AWS account ID into the script. The script checks the bank's control database to confirm that the AWS account ID is mapped to the same application ID.
+The ADO pipeline passes the ITAM and target cloud account identifier into the script. For AWS this is the AWS account ID. For Azure this is the Azure subscription ID. The script checks the bank's control database to confirm that the account or subscription is mapped to the same application ID.
 
 The validation uses the account mapping table:
 
@@ -78,15 +78,15 @@ The validation uses the account mapping table:
 resilience.account_environments
 ```
 
-The tool checks the `app_id` associated with the AWS account ID and compares it with the ITAM value supplied to the pipeline.
+The tool checks the `app_id` associated with the account or subscription and compares it with the ITAM value supplied to the pipeline.
 
 ### Failure or Stop Condition
 
-If the AWS account ID is not found in the control database, the tool stops.
+If the target account or subscription is not found in the control database, the tool stops.
 
-If the AWS account ID belongs to a different ITAM, the tool stops.
+If the target account or subscription belongs to a different ITAM, the tool stops.
 
-The resilience test does not proceed until the ITAM and AWS account ID mapping is valid.
+The resilience test does not proceed until the ITAM and cloud account mapping is valid.
 
 ### Evidence Produced
 
@@ -94,19 +94,19 @@ The pipeline log records whether the ITAM and account validation passed or faile
 
 When database persistence is enabled, the run metadata and validation state can also be retained in the PostgreSQL database.
 
-## Control 3: AWS Account ID and Environment Validation
+## Control 3: Cloud Account and Environment Validation
 
 ### Control Objective
 
-The environment selected in the ADO pipeline must match the actual environment of the AWS account.
+The environment selected in the ADO pipeline must match the actual environment of the AWS account or Azure subscription.
 
-This reduces the risk of a user accidentally selecting the wrong environment, such as running a production-style test against a non-production account or selecting non-production while targeting a production account.
+This reduces the risk of a user accidentally selecting the wrong environment, such as running a production-style test against a non-production account or selecting non-production while targeting a production account or subscription.
 
 ### How the Control Works
 
-When database controls are enabled, the tool validates the relationship between the AWS account ID and the environment before the resilience test proceeds.
+When database controls are enabled, the tool validates the relationship between the target cloud account or subscription and the environment before the resilience test proceeds.
 
-The ADO pipeline passes the AWS account ID and environment into the script. The script checks the bank's control database to confirm the environment mapped to that AWS account.
+The ADO pipeline passes the cloud account identifier and environment into the script. The script checks the bank's control database to confirm the environment mapped to that account or subscription.
 
 The validation uses the account mapping table:
 
@@ -118,7 +118,7 @@ The tool compares the database environment with the environment supplied through
 
 ### Failure or Stop Condition
 
-If the AWS account ID is not found in the control database, the tool stops.
+If the target account or subscription is not found in the control database, the tool stops.
 
 If the environment in the database does not match the environment selected in the ADO pipeline, the tool stops.
 
@@ -144,7 +144,7 @@ After the identity and account checks pass, the tool performs pre-execution vali
 
 Examples of these validations include:
 
-- checking that selected AWS resources exist;
+- checking that selected cloud resources exist;
 - checking that DNS records exist before DNS changes are planned;
 - checking that DNS values or weighted DNS targets are valid;
 - checking that Auto Scaling Group scale values are valid;
@@ -225,10 +225,10 @@ The main control design is that the resilience test is not a one-step execution.
 
 1. Generate a dry-run plan.
 2. Require review and approval by the correct PSS team.
-3. Validate that the ITAM owns the AWS account.
-4. Validate that the selected environment matches the AWS account.
+3. Validate that the ITAM owns the cloud account or subscription.
+4. Validate that the selected environment matches the cloud account or subscription.
 5. Validate that the target resources and requested actions are suitable.
 6. Execute the resilience test only after the required controls pass.
 7. Retain generated artifacts and ADO approval evidence for audit.
 
-Together, these controls help ensure that resilience testing is authorized, reviewed, traceable, and limited to the correct application-owned AWS accounts.
+Together, these controls help ensure that resilience testing is authorized, reviewed, traceable, and limited to the correct application-owned cloud accounts and subscriptions.
