@@ -1,53 +1,16 @@
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Dict, List, Optional, Type
+"""Backward-compatible import wrapper for AWS provider module."""
 
-from utility import normalize_service_name
+import importlib as _importlib
 
+_impl = _importlib.import_module("providers.aws.component_actions.base")
 
-class CustomComponentAction(ABC):
-    registry: ClassVar[List[Type["CustomComponentAction"]]] = []
-    service_name: ClassVar[Optional[str]] = None
-    action_names: ClassVar[List[str]] = []
+globals().update(
+    {
+        name: getattr(_impl, name)
+        for name in dir(_impl)
+        if not name.startswith("__")
+    }
+)
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        if cls.service_name and cls.action_names:
-            CustomComponentAction.registry.append(cls)
-
-    def supports(self, service_name: str, action: str) -> bool:
-        return normalize_service_name(service_name) == self.service_name and action in self.action_names
-
-    def default_region(
-        self,
-        *,
-        manifest: Dict[str, Any],
-        svc: Dict[str, Any],
-        fallback_region: Optional[str],
-    ) -> Optional[str]:
-        _ = manifest
-        _ = svc
-        return fallback_region
-
-    @abstractmethod
-    def build_plan_item(
-        self,
-        *,
-        manifest: Dict[str, Any],
-        svc: Dict[str, Any],
-        session,
-        region: str,
-        index: int,
-        default_timeout_seconds: int,
-    ) -> Dict[str, Any]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def execute_item(
-        self,
-        *,
-        session,
-        item: Dict[str, Any],
-        poll_seconds: int,
-        timeout_seconds: int,
-    ) -> Dict[str, Any]:
-        raise NotImplementedError
+del _impl
+__all__ = [name for name in globals() if not name.startswith("__")]

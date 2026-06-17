@@ -1,27 +1,16 @@
-from __future__ import annotations
+"""Backward-compatible import wrapper for AWS provider module."""
 
-from typing import Any, Dict
+import importlib as _importlib
 
-from .base import ManifestService, ServiceTemplateGenerator
+_impl = _importlib.import_module("providers.aws.template_generator.common_template_generator")
 
-
-class CommonTemplateGenerator(ServiceTemplateGenerator):
-    service_name = "common"
-    action_map = {
-        "wait": "aws:fis:wait",
+globals().update(
+    {
+        name: getattr(_impl, name)
+        for name in dir(_impl)
+        if not name.startswith("__")
     }
-    target_spec_map = {}
+)
 
-    def build_action_parameters(
-        self,
-        *,
-        manifest: Dict[str, Any],
-        svc: ManifestService,
-        action_id: str,
-    ) -> Dict[str, str]:
-        _ = manifest
-        if action_id != "aws:fis:wait":
-            return {}
-        if not svc.duration:
-            raise ValueError("common:wait requires services[].duration (for example PT2M).")
-        return {"duration": svc.duration}
+del _impl
+__all__ = [name for name in globals() if not name.startswith("__")]

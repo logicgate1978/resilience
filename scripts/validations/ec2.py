@@ -1,14 +1,16 @@
-from validations.base import BaseServiceValidator, ValidationContext
+"""Backward-compatible import wrapper for AWS provider module."""
 
+import importlib as _importlib
 
-class EC2Validator(BaseServiceValidator):
-    service_name = "ec2"
+_impl = _importlib.import_module("providers.aws.validations.ec2")
 
-    def verify_resource_existence(self, context: ValidationContext) -> None:
-        arns = context.get_selected_resource_arns()
-        if arns:
-            return
-        self.fail(
-            context,
-            f"no resources matched the selection criteria ({context.selection_summary()}).",
-        )
+globals().update(
+    {
+        name: getattr(_impl, name)
+        for name in dir(_impl)
+        if not name.startswith("__")
+    }
+)
+
+del _impl
+__all__ = [name for name in globals() if not name.startswith("__")]

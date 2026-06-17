@@ -1,17 +1,16 @@
-from component_actions.registry import (
-    build_custom_execution_plan,
-    collect_custom_impacted_resources,
-    execute_custom_plan,
-    manifest_has_custom_actions,
-    service_uses_custom_engine,
-    validate_component_action_mix,
+"""Backward-compatible import wrapper for AWS provider module."""
+
+import importlib as _importlib
+
+_impl = _importlib.import_module("providers.aws.component_actions")
+
+globals().update(
+    {
+        name: getattr(_impl, name)
+        for name in dir(_impl)
+        if not name.startswith("__")
+    }
 )
 
-__all__ = [
-    "build_custom_execution_plan",
-    "collect_custom_impacted_resources",
-    "execute_custom_plan",
-    "manifest_has_custom_actions",
-    "service_uses_custom_engine",
-    "validate_component_action_mix",
-]
+del _impl
+__all__ = [name for name in globals() if not name.startswith("__")]
