@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Tuple
 
 from kubernetes.client.exceptions import ApiException
 
-from component_actions.dns import DNSAction
-from component_actions.k8s_auth import create_apps_v1_api
+from providers.aws.component_actions.dns import DNSAction
+from providers.aws.component_actions.k8s_auth import create_apps_v1_api
 from utility import (
     coerce_bool,
     log_message,
@@ -16,7 +16,7 @@ from utility import (
     utc_ts,
 )
 
-from resource import discover_rds_global_clusters
+from providers.aws.resource import discover_rds_global_clusters
 
 
 REGION_ACTION_CONFIG: Dict[str, Dict[str, Any]] = {

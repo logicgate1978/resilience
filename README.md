@@ -15,7 +15,7 @@ For Azure, the framework now supports an isolated provider path for dry-run plan
 
 Existing manifests that omit `provider` continue to run as AWS manifests.
 
-The AWS provider is exposed through `scripts/providers/aws/`. FIS, ARC, resource discovery, observability, and rollback now live under this provider path, with backward-compatible wrappers left at the old top-level import paths. The larger AWS packages for custom actions, template generation, and validations remain compatibility internals while the codebase transitions to a provider-based layout.
+The AWS provider is exposed through `scripts/providers/aws/`. FIS, ARC, custom actions, template generation, resource discovery, observability, rollback, and validations now have provider-local modules. Backward-compatible top-level imports remain available while the codebase transitions to a provider-based layout.
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 

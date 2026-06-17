@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from component_actions.asg import ASGScaleAction
-from component_actions.dns import DNSAction
-from component_actions.eks import EKSAction
-from component_actions.s3 import S3FailoverAction
+from providers.aws.component_actions.asg import ASGScaleAction
+from providers.aws.component_actions.dns import DNSAction
+from providers.aws.component_actions.eks import EKSAction
+from providers.aws.component_actions.s3 import S3FailoverAction
 from utility import log_message, utc_ts
 
 

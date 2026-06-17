@@ -420,7 +420,7 @@ def _resolve_efs_destination_from_service(
     destination_file_system_id: Optional[str],
     destination_tags: Dict[str, str],
 ) -> Optional[str]:
-    from resource import _collect_efs_file_systems
+    from providers.aws.resource import _collect_efs_file_systems
 
     arns = _collect_efs_file_systems(
         session,
@@ -464,7 +464,7 @@ def _resolve_efs_observability_resources(
     session,
     default_region: str,
 ) -> List[Dict[str, Any]]:
-    from resource import collect_service_resource_arns
+    from providers.aws.resource import collect_service_resource_arns
 
     out: List[Dict[str, Any]] = []
     services = manifest.get("services") or []
