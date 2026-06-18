@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from providers.azure.resource import (
+    resource_label,
+    resolve_location,
+    resolve_resource_group,
+    selection_summary,
+    target_resource_ids,
+)
+from providers.azure.runtime import AzureRuntimeContext, create_runtime_context
 from utility import normalize_service_name, utc_ts
 
 
@@ -16,13 +24,6 @@ def _manifest_services(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
     if len(out) != len(services):
         raise ValueError("Every item in top-level 'services' must be an object.")
     return out
-
-
-def _resolve_subscription_id(manifest: Dict[str, Any], subscription_id: Optional[str]) -> str:
-    value = str(subscription_id or manifest.get("subscription_id") or "").strip()
-    if not value:
-        raise ValueError("Azure manifests require subscription_id at the top level or --subscription-id.")
-    return value
 
 
 def _service_engine(manifest: Dict[str, Any], svc: Dict[str, Any], index: int) -> str:
@@ -95,35 +96,6 @@ def _resolve_start_after(services: List[Dict[str, Any]], item_names: List[str]) 
     return resolved
 
 
-def _target_resource_ids(target: Dict[str, Any]) -> List[str]:
-    resource_ids = target.get("resource_ids")
-    if isinstance(resource_ids, list):
-        return [str(value).strip() for value in resource_ids if str(value).strip()]
-    resource_id = str(target.get("resource_id") or "").strip()
-    return [resource_id] if resource_id else []
-
-
-def _resource_label(resource_id: str) -> str:
-    text = str(resource_id or "").strip()
-    if not text:
-        return "-"
-    parts = [part for part in text.split("/") if part]
-    return parts[-1] if parts else text
-
-
-def _selection_summary(target: Dict[str, Any]) -> str:
-    resource_ids = _target_resource_ids(target)
-    if resource_ids:
-        return ", ".join(_resource_label(resource_id) for resource_id in resource_ids)
-    tags = target.get("tags")
-    if isinstance(tags, str) and tags.strip():
-        return f"tags: {tags.strip()}"
-    if isinstance(tags, dict) and tags:
-        return "tags: " + ",".join(f"{key}={value}" for key, value in sorted(tags.items()))
-    resource_group = str(target.get("resource_group") or "").strip()
-    return f"resource_group: {resource_group}" if resource_group else "-"
-
-
 def _stringify_value(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -155,7 +127,7 @@ def _detail_entry(*, index: int, item: Dict[str, Any], resources: List[Dict[str,
             continue
         detailed_resources.append(
             {
-                "label": str(resource.get("label") or _resource_label(arn)),
+                "label": str(resource.get("label") or resource_label(arn)),
                 "arn": arn,
             }
         )
@@ -175,9 +147,15 @@ def build_azure_execution_plan(
     *,
     subscription_id: Optional[str],
     default_timeout_seconds: int,
+    runtime_context: Optional[AzureRuntimeContext] = None,
 ) -> Dict[str, Any]:
     services = _manifest_services(manifest)
-    resolved_subscription_id = _resolve_subscription_id(manifest, subscription_id)
+    context = runtime_context or create_runtime_context(
+        manifest,
+        subscription_id=subscription_id,
+        require_credential=False,
+    )
+    resolved_subscription_id = context.subscription_id
     engine_families = {_service_engine(manifest, svc, index) for index, svc in enumerate(services)}
     if len(engine_families) > 1:
         raise ValueError(
@@ -196,6 +174,7 @@ def build_azure_execution_plan(
         engine = _service_engine(manifest, svc, index - 1)
         target = svc.get("target") if isinstance(svc.get("target"), dict) else {}
         parameters = svc.get("parameters") if isinstance(svc.get("parameters"), dict) else {}
+        item_subscription_id = str(svc.get("subscription_id") or resolved_subscription_id).strip()
         item_name = f"a_{service_name}_{action_name}_{index}"
         item = {
             "name": item_name,
@@ -203,9 +182,9 @@ def build_azure_execution_plan(
             "service": f"{service_name}:{action_name}",
             "provider": "azure",
             "engine": engine,
-            "subscriptionId": str(svc.get("subscription_id") or resolved_subscription_id),
-            "resourceGroup": str(target.get("resource_group") or svc.get("resource_group") or manifest.get("resource_group") or ""),
-            "location": str(target.get("location") or svc.get("location") or manifest.get("location") or manifest.get("region") or ""),
+            "subscriptionId": item_subscription_id,
+            "resourceGroup": resolve_resource_group(manifest, svc, target),
+            "location": resolve_location(manifest, svc, target),
             "target": target,
             "parameters": {
                 **parameters,
@@ -233,22 +212,22 @@ def collect_azure_impacted_resources(execution_plan: Dict[str, Any]) -> List[Dic
     resources: List[Dict[str, str]] = []
     for item in execution_plan.get("items") or []:
         target = item.get("target") or {}
-        for resource_id in _target_resource_ids(target):
+        for resource_id in target_resource_ids(target):
             resources.append(
                 {
                     "service": str(item.get("service") or ""),
                     "arn": resource_id,
                     "selection_mode": "AZURE_RESOURCE_ID",
-                    "label": _resource_label(resource_id),
+                    "label": resource_label(resource_id),
                 }
             )
-        if not _target_resource_ids(target):
+        if not target_resource_ids(target):
             resources.append(
                 {
                     "service": str(item.get("service") or ""),
-                    "arn": _selection_summary(target),
+                    "arn": selection_summary(target),
                     "selection_mode": "AZURE_SELECTOR",
-                    "label": _selection_summary(target),
+                    "label": selection_summary(target),
                 }
             )
     return resources
@@ -261,10 +240,10 @@ def build_azure_dry_run_rows(execution_plan: Dict[str, Any]) -> Tuple[List[List[
     for index, item in enumerate(items, start=1):
         resources = []
         target = item.get("target") or {}
-        for resource_id in _target_resource_ids(target):
-            resources.append({"arn": resource_id, "label": _resource_label(resource_id)})
+        for resource_id in target_resource_ids(target):
+            resources.append({"arn": resource_id, "label": resource_label(resource_id)})
         if not resources:
-            summary = _selection_summary(target)
+            summary = selection_summary(target)
             resources.append({"arn": summary, "label": summary})
 
         key_parameters = _format_key_parameters(item.get("parameters") or {})

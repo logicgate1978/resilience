@@ -1,6 +1,6 @@
 # Resilience Testing Framework
 
-This repository contains a manifest-driven resilience testing framework for AWS workloads, with an Azure provider path being introduced for Azure Chaos Studio planning.
+This repository contains a manifest-driven resilience testing framework for AWS workloads, with an Azure provider path being introduced for Azure Chaos Studio planning and runtime setup.
 
 For AWS, it currently supports three execution models:
 
@@ -8,7 +8,7 @@ For AWS, it currently supports three execution models:
 2. AWS ARC Region switch for Aurora Global Database failover and switchover when `service.use_arc: true`
 3. Custom actions for behaviors that are not available as native FIS actions, or for supported `use_fis: false` / `use_arc: false` fallbacks
 
-For Azure, the framework now supports an isolated provider path for dry-run planning with:
+For Azure, the framework now supports an isolated provider path for runtime context and dry-run planning with:
 
 1. Azure Chaos Studio (`engine: chaos_studio`)
 2. Azure custom actions (`engine: custom`, scaffolded for future implementation)
@@ -16,6 +16,8 @@ For Azure, the framework now supports an isolated provider path for dry-run plan
 Existing manifests that omit `provider` continue to run as AWS manifests.
 
 The AWS provider is exposed through `scripts/providers/aws/`. FIS, ARC, custom actions, template generation, resource discovery, observability, rollback, and validations now have provider-local modules. Backward-compatible top-level imports remain available while the codebase transitions to a provider-based layout.
+
+The Azure provider is exposed through `scripts/providers/azure/`. Phase 4 adds provider-local runtime, authentication, resource ID, artifact, and runner modules. Azure execution is still intentionally blocked outside `--dry-run`; the runtime foundation is in place so the next phase can add real Azure Chaos Studio experiment creation and polling without changing AWS behavior.
 
 The project is designed so that a human engineer or another AI can continue the work with minimal re-discovery. This README is intended to be the main design handoff document for the current codebase.
 
@@ -1671,7 +1673,7 @@ python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 
 ### Plan an Azure Chaos Studio Test
 
-Azure support is currently implemented as an isolated provider path for dry-run approval planning. Real Azure Chaos Studio execution is intentionally blocked until the Azure execution adapter and credential flow are enabled.
+Azure support is currently implemented as an isolated provider path for runtime context and dry-run approval planning. Real Azure Chaos Studio execution is intentionally blocked until the Azure execution adapter is enabled in the next phase.
 
 Example:
 
@@ -1680,6 +1682,15 @@ python main.py --manifest ..\manifests\azure-chaos-studio-dry-run.yml --dry-run
 ```
 
 Azure manifests use `provider: azure` and `engine: chaos_studio`. Existing AWS manifests do not need a `provider` field because they default to `aws`.
+
+Azure runtime behavior:
+
+- `subscription_id` is required either in the manifest or through `--subscription-id`.
+- `resource_group` and `location` can be set at the manifest level, service level, or under `service.target`.
+- When a target uses a full Azure resource ID, the tool validates that the resource belongs to the requested subscription.
+- When `resource_group` is omitted but the target has a full resource ID, the resource group is derived from that ID for the dry-run plan.
+- Azure authentication is prepared through `DefaultAzureCredential`, but credentials are not requested during dry-run planning.
+- Non-dry-run Azure execution remains blocked with a clear error until Chaos Studio execution is implemented.
 
 ### Dry Run
 

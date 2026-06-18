@@ -27,11 +27,7 @@ from providers.aws.rollback import (
     build_rollback_execution_plan,
     execute_rollback_plan,
 )
-from providers.azure import (
-    build_azure_execution_plan,
-    build_azure_dry_run_rows,
-    collect_azure_impacted_resources,
-)
+from providers.azure import run_azure_manifest
 from providers.aws.resource import collect_impacted_resources
 from utility import (
     coerce_bool,
@@ -997,56 +993,16 @@ def main() -> int:
         return 1
 
     if provider == "azure":
-        execution_plan = build_azure_execution_plan(
-            manifest,
+        return run_azure_manifest(
+            manifest=manifest,
+            manifest_path=args.manifest,
+            outdir=args.outdir,
             subscription_id=args.subscription_id,
-            default_timeout_seconds=args.timeout_seconds,
-        )
-        plan_name = execution_plan["name"]
-        execution_plan_path = os.path.join(args.outdir, f"azure_execution_plan_{plan_name}.json")
-        with open(execution_plan_path, "w", encoding="utf-8") as f:
-            f.write(pretty(execution_plan))
-        log_message("OK", f"Wrote Azure execution plan JSON: {execution_plan_path}")
-
-        artifact_entries: List[Dict[str, Any]] = [
-            _artifact_entry("manifest", local_path=os.path.abspath(args.manifest), content_json=manifest),
-            _artifact_entry("other", local_path=execution_plan_path, content_json=execution_plan),
-        ]
-        impacted_resources = collect_azure_impacted_resources(execution_plan)
-        impacted_resources_path = os.path.join(args.outdir, "impacted_resources.json")
-        with open(impacted_resources_path, "w", encoding="utf-8") as f:
-            f.write(pretty({"impacted_resources": impacted_resources}))
-        log_message("OK", f"Wrote impacted resources JSON: {impacted_resources_path}")
-        artifact_entries.append(
-            _artifact_entry(
-                "impacted_resources",
-                local_path=impacted_resources_path,
-                content_json={"impacted_resources": impacted_resources},
-            )
-        )
-
-        if args.dry_run:
-            dry_run_rows, dry_run_details = build_azure_dry_run_rows(execution_plan)
-            dry_run_text = _build_dry_run_summary_text(
-                manifest_path=os.path.abspath(args.manifest),
-                engine_family=str(execution_plan.get("engineFamily") or "azure"),
-                rows=dry_run_rows,
-                details=dry_run_details,
-                account_id=control_account_id,
-            )
-            dry_run_summary_path = _write_dry_run_summary(
-                outdir=args.outdir,
-                name=plan_name,
-                text=dry_run_text,
-            )
-            print(dry_run_text, flush=True)
-            log_message("OK", f"Wrote dry-run approval summary: {dry_run_summary_path}")
-            artifact_entries.append(_artifact_entry("other", local_path=dry_run_summary_path))
-            log_message("INFO", "Dry-run enabled: skipping Azure create/execute.")
-            return 0
-
-        raise ValueError(
-            "Azure execution is not enabled yet. Run with --dry-run to generate the Azure Chaos Studio approval plan."
+            timeout_seconds=args.timeout_seconds,
+            dry_run=args.dry_run,
+            control_account_id=control_account_id,
+            build_dry_run_summary_text=_build_dry_run_summary_text,
+            write_dry_run_summary=_write_dry_run_summary,
         )
 
     engine_family = _resolve_manifest_engine_family(manifest)
