@@ -8,6 +8,7 @@ from providers.azure.engines.chaos_studio import (
     build_azure_dry_run_rows,
     build_azure_execution_plan,
     collect_azure_impacted_resources,
+    execute_chaos_studio_plan,
 )
 from providers.azure.runtime import create_runtime_context
 from utility import log_message, pretty
@@ -24,6 +25,7 @@ def run_azure_manifest(
     outdir: str,
     subscription_id: Optional[str],
     timeout_seconds: int,
+    poll_seconds: int,
     dry_run: bool,
     control_account_id: Optional[str],
     build_dry_run_summary_text: DryRunTextBuilder,
@@ -32,7 +34,7 @@ def run_azure_manifest(
     runtime_context = create_runtime_context(
         manifest,
         subscription_id=subscription_id,
-        require_credential=False,
+        require_credential=not dry_run,
     )
     if runtime_context.resource_group:
         log_message("INFO", f"Azure runtime default resource_group={runtime_context.resource_group}.")
@@ -90,6 +92,15 @@ def run_azure_manifest(
         log_message("INFO", "Dry-run enabled: skipping Azure create/execute.")
         return 0
 
-    raise ValueError(
-        "Azure execution is not enabled yet. Run with --dry-run to generate the Azure Chaos Studio approval plan."
+    result = execute_chaos_studio_plan(
+        execution_plan=execution_plan,
+        runtime_context=runtime_context,
+        outdir=outdir,
+        poll_seconds=poll_seconds,
+        timeout_seconds=timeout_seconds,
     )
+    result_path = str(result.get("resultPath") or "").strip()
+    if result_path:
+        artifact_entries.append(artifact_entry("other", local_path=result_path, content_json=result))
+    status = str(result.get("status") or "").strip().lower()
+    return 0 if status in {"success", "succeeded", "completed"} else 1

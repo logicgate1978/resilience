@@ -64,6 +64,13 @@ def target_resource_ids(target: Dict[str, Any]) -> List[str]:
     return [resource_id] if resource_id else []
 
 
+def chaos_target_id(resource_id: Any, target_type: str) -> str:
+    text = normalize_resource_id(resource_id)
+    if not text:
+        raise ValueError("Azure Chaos target ID requires a non-empty resource ID.")
+    return f"{text}/providers/Microsoft.Chaos/targets/{target_type}"
+
+
 def resource_label(resource_id: Any) -> str:
     text = normalize_resource_id(resource_id)
     if not text:

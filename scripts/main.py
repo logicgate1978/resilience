@@ -999,6 +999,7 @@ def main() -> int:
             outdir=args.outdir,
             subscription_id=args.subscription_id,
             timeout_seconds=args.timeout_seconds,
+            poll_seconds=args.poll_seconds,
             dry_run=args.dry_run,
             control_account_id=control_account_id,
             build_dry_run_summary_text=_build_dry_run_summary_text,

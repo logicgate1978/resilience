@@ -1671,9 +1671,9 @@ From `scripts/`:
 python main.py --manifest ..\manifests\geo-rds.yml --arc-role-arn <arc-role-arn>
 ```
 
-### Plan an Azure Chaos Studio Test
+### Run or Plan an Azure Chaos Studio Test
 
-Azure support is currently implemented as an isolated provider path for runtime context and dry-run approval planning. Real Azure Chaos Studio execution is intentionally blocked until the Azure execution adapter is enabled in the next phase.
+Azure support is implemented as an isolated provider path for runtime context, dry-run approval planning, and an initial live Chaos Studio action: Virtual Machine Shutdown.
 
 Example:
 
@@ -1689,8 +1689,18 @@ Azure runtime behavior:
 - `resource_group` and `location` can be set at the manifest level, service level, or under `service.target`.
 - When a target uses a full Azure resource ID, the tool validates that the resource belongs to the requested subscription.
 - When `resource_group` is omitted but the target has a full resource ID, the resource group is derived from that ID for the dry-run plan.
-- Azure authentication is prepared through `DefaultAzureCredential`, but credentials are not requested during dry-run planning.
-- Non-dry-run Azure execution remains blocked with a clear error until Chaos Studio execution is implemented.
+- Azure authentication uses `DefaultAzureCredential` for non-dry-run execution. Credentials are not requested during dry-run planning.
+- The first supported live Chaos Studio action is `vm:stop` / `vm:shutdown`, which maps to Azure Chaos Studio Virtual Machine Shutdown.
+- VM shutdown requires `service.target.resource_id` or `service.target.resource_ids` with full `Microsoft.Compute/virtualMachines` resource IDs.
+- The VM must already be onboarded to Chaos Studio with the `Microsoft-VirtualMachine` target and shutdown capability available.
+- Optional VM shutdown parameter: `abruptShutdown` or `abrupt_shutdown`, defaulting to `false`.
+- Unsupported Azure Chaos Studio actions fail closed until they are explicitly implemented.
+
+To run the VM shutdown experiment after PSS approval:
+
+```powershell
+python main.py --manifest ..\manifests\azure-chaos-studio-dry-run.yml
+```
 
 ### Dry Run
 
