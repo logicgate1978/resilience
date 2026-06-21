@@ -97,6 +97,20 @@ def launch_template_lookup_kwargs(launch_template_spec: Dict[str, str]) -> Dict[
     fail("Launch Template specification has neither LaunchTemplateId nor LaunchTemplateName.")
 
 
+def launch_template_update_spec(launch_template_spec: Dict[str, str], version: str) -> Dict[str, str]:
+    if launch_template_spec.get("LaunchTemplateId"):
+        return {
+            "LaunchTemplateId": str(launch_template_spec["LaunchTemplateId"]),
+            "Version": str(version),
+        }
+    if launch_template_spec.get("LaunchTemplateName"):
+        return {
+            "LaunchTemplateName": str(launch_template_spec["LaunchTemplateName"]),
+            "Version": str(version),
+        }
+    fail("Launch Template specification has neither LaunchTemplateId nor LaunchTemplateName.")
+
+
 def create_launch_template_version(
     ec2,
     launch_template_spec: Dict[str, str],
@@ -128,12 +142,8 @@ def update_asg_launch_template(
     new_version: str,
     uses_mixed_instances_policy: bool,
 ) -> None:
-    updated_spec = {
-        key: value
-        for key, value in launch_template_spec.items()
-        if key in {"LaunchTemplateId", "LaunchTemplateName"}
-    }
-    updated_spec["Version"] = new_version
+    updated_spec = launch_template_update_spec(launch_template_spec, new_version)
+    log(f"[INFO] Updating ASG Launch Template reference: {updated_spec}")
 
     if not uses_mixed_instances_policy:
         autoscaling.update_auto_scaling_group(
@@ -222,6 +232,7 @@ def refresh_instances_by_scaling(
     autoscaling.update_auto_scaling_group(
         AutoScalingGroupName=asg_name,
         MinSize=0,
+        MaxSize=original_max,
         DesiredCapacity=0,
     )
     wait_for_capacity(
