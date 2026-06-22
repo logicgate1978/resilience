@@ -11,6 +11,11 @@ from providers.azure.engines.chaos_studio import (
     execute_chaos_studio_plan,
 )
 from providers.azure.runtime import create_runtime_context
+from providers.azure.validations import (
+    ValidationError,
+    manifest_skip_validation_enabled,
+    validate_manifest_services,
+)
 from utility import log_message, pretty
 
 
@@ -27,20 +32,38 @@ def run_azure_manifest(
     timeout_seconds: int,
     poll_seconds: int,
     dry_run: bool,
+    skip_validation: bool,
     control_account_id: Optional[str],
     build_dry_run_summary_text: DryRunTextBuilder,
     write_dry_run_summary: DryRunSummaryWriter,
 ) -> int:
+    manifest_skip_validation = manifest_skip_validation_enabled(manifest)
+    global_skip_validation = bool(skip_validation or manifest_skip_validation)
     runtime_context = create_runtime_context(
         manifest,
         subscription_id=subscription_id,
-        require_credential=not dry_run,
+        require_credential=(not dry_run) or not global_skip_validation,
     )
     if runtime_context.resource_group:
         log_message("INFO", f"Azure runtime default resource_group={runtime_context.resource_group}.")
     if runtime_context.location:
         log_message("INFO", f"Azure runtime default location={runtime_context.location}.")
     log_message("INFO", f"Azure runtime subscription_id={runtime_context.subscription_id}.")
+
+    if global_skip_validation:
+        if skip_validation:
+            log_message("WARN", "--skip-validation enabled: skipping Azure pre-execution validation.")
+        elif manifest_skip_validation:
+            log_message("WARN", "manifest.skip_validation enabled: skipping Azure pre-execution validation.")
+    else:
+        try:
+            validate_manifest_services(
+                manifest,
+                runtime_context=runtime_context,
+            )
+        except ValidationError as e:
+            print(f"[ERROR] {e}", flush=True)
+            return 1
 
     execution_plan = build_azure_execution_plan(
         manifest,

@@ -1001,6 +1001,7 @@ def main() -> int:
             timeout_seconds=args.timeout_seconds,
             poll_seconds=args.poll_seconds,
             dry_run=args.dry_run,
+            skip_validation=args.skip_validation,
             control_account_id=control_account_id,
             build_dry_run_summary_text=_build_dry_run_summary_text,
             write_dry_run_summary=_write_dry_run_summary,

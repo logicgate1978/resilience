@@ -1695,6 +1695,7 @@ Azure runtime behavior:
 - The VM must already be onboarded to Chaos Studio with the `Microsoft-VirtualMachine` target and shutdown capability available.
 - For live VM shutdown, the tool creates/updates the experiment with a system-assigned identity, assigns that identity `Virtual Machine Contributor` on each target VM, then starts the experiment.
 - The ADO pipeline identity must be allowed to create role assignments at the target VM scope, for example through `Owner` or `User Access Administrator`.
+- Azure actions must have pre-execution validations before they are enabled. For `vm:stop` / `vm:shutdown`, the tool validates that the VM exists and that the Chaos Studio `Microsoft-VirtualMachine` target exists before planning/execution continues.
 - Optional VM shutdown parameter: `abruptShutdown` or `abrupt_shutdown`, defaulting to `false`.
 - Unsupported Azure Chaos Studio actions fail closed until they are explicitly implemented.
 
