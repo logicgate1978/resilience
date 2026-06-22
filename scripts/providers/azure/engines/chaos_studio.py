@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
@@ -22,10 +23,12 @@ import requests
 
 AZURE_ENGINES = {"chaos_studio", "custom"}
 CHAOS_STUDIO_API_VERSION = "2025-01-01"
+AZURE_AUTHORIZATION_API_VERSION = "2022-04-01"
 AZURE_MANAGEMENT_SCOPE = "https://management.azure.com/.default"
 VM_SHUTDOWN_URN = "urn:csci:microsoft:virtualMachine:shutdown/1.0"
 VM_SHUTDOWN_TARGET_TYPE = "Microsoft-VirtualMachine"
 VM_SHUTDOWN_RESOURCE_TYPE = ("microsoft.compute", "virtualmachines")
+VM_CONTRIBUTOR_ROLE_DEFINITION_ID = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
 TERMINAL_EXECUTION_STATUSES = {"success", "succeeded", "completed", "failed", "canceled", "cancelled", "stopped"}
 
 
@@ -399,6 +402,10 @@ def _experiment_path(subscription_id: str, resource_group: str, experiment_name:
     )
 
 
+def _role_definition_id(subscription_id: str, role_definition_guid: str) -> str:
+    return f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleDefinitions/{role_definition_guid}"
+
+
 def _request_json(method: str, url: str, *, headers: Dict[str, str], json_body: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, str], int]:
     response = requests.request(method, url, headers=headers, json=json_body, timeout=60)
     if response.status_code >= 400:
@@ -414,6 +421,18 @@ def _request_json(method: str, url: str, *, headers: Dict[str, str], json_body: 
         except Exception:
             payload = {"raw": response.text}
     return payload, dict(response.headers), response.status_code
+
+
+def _get_experiment(
+    *,
+    headers: Dict[str, str],
+    subscription_id: str,
+    resource_group: str,
+    experiment_name: str,
+) -> Dict[str, Any]:
+    url = _management_url(_experiment_path(subscription_id, resource_group, experiment_name))
+    payload, _, _ = _request_json("GET", url, headers=headers)
+    return payload
 
 
 def _poll_async_operation(url: str, *, headers: Dict[str, str], poll_seconds: int, timeout_seconds: int) -> Dict[str, Any]:
@@ -448,6 +467,92 @@ def _list_executions(
             return []
         raise
     return list(payload.get("value") or [])
+
+
+def _experiment_principal_id(experiment: Dict[str, Any]) -> str:
+    identity = experiment.get("identity") if isinstance(experiment.get("identity"), dict) else {}
+    return str(identity.get("principalId") or identity.get("principal_id") or "").strip()
+
+
+def _target_resource_ids_for_rbac(execution_plan: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for item in execution_plan.get("items") or []:
+        for resource_id in target_resource_ids(item.get("target") or {}):
+            normalized = str(resource_id or "").strip()
+            if normalized and normalized not in seen:
+                _validate_vm_shutdown_target(normalized)
+                out.append(normalized)
+                seen.add(normalized)
+    return out
+
+
+def _assign_vm_contributor_role(
+    *,
+    headers: Dict[str, str],
+    subscription_id: str,
+    principal_id: str,
+    target_resource_id: str,
+    experiment_id: str,
+) -> Dict[str, Any]:
+    role_definition_id = _role_definition_id(subscription_id, VM_CONTRIBUTOR_ROLE_DEFINITION_ID)
+    assignment_name = str(
+        uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"{target_resource_id.lower()}|{experiment_id.lower()}|{role_definition_id.lower()}",
+        )
+    )
+    path = f"{target_resource_id}/providers/Microsoft.Authorization/roleAssignments/{assignment_name}"
+    url = f"https://management.azure.com{path}?api-version={AZURE_AUTHORIZATION_API_VERSION}"
+    body = {
+        "properties": {
+            "roleDefinitionId": role_definition_id,
+            "principalId": principal_id,
+            "principalType": "ServicePrincipal",
+        }
+    }
+    payload, _, status_code = _request_json("PUT", url, headers=headers, json_body=body)
+    log_message(
+        "OK",
+        f"Assigned Virtual Machine Contributor to experiment identity on {resource_label(target_resource_id)} "
+        f"(roleAssignment={assignment_name}, status={status_code}).",
+    )
+    return {
+        "targetResourceId": target_resource_id,
+        "roleAssignmentName": assignment_name,
+        "roleDefinitionId": role_definition_id,
+        "principalId": principal_id,
+        "statusCode": status_code,
+        "response": payload,
+    }
+
+
+def _assign_vm_shutdown_roles(
+    *,
+    headers: Dict[str, str],
+    subscription_id: str,
+    execution_plan: Dict[str, Any],
+    experiment: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    principal_id = _experiment_principal_id(experiment)
+    experiment_id = str(experiment.get("id") or "").strip()
+    if not principal_id:
+        raise ValueError("Azure Chaos Studio experiment system-assigned identity does not have a principalId yet.")
+    if not experiment_id:
+        raise ValueError("Azure Chaos Studio experiment response did not include an experiment resource ID.")
+
+    assignments = []
+    for target_resource_id in _target_resource_ids_for_rbac(execution_plan):
+        assignments.append(
+            _assign_vm_contributor_role(
+                headers=headers,
+                subscription_id=subscription_id,
+                principal_id=principal_id,
+                target_resource_id=target_resource_id,
+                experiment_id=experiment_id,
+            )
+        )
+    return assignments
 
 
 def _get_execution(
@@ -531,6 +636,20 @@ def execute_chaos_studio_plan(
         timeout_seconds=timeout_seconds,
     )
     log_message("OK", f"Created/updated Azure Chaos Studio experiment: {experiment_name}")
+    experiment = create_payload
+    if not _experiment_principal_id(experiment):
+        experiment = _get_experiment(
+            headers=headers,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            experiment_name=experiment_name,
+        )
+    role_assignments = _assign_vm_shutdown_roles(
+        headers=headers,
+        subscription_id=subscription_id,
+        execution_plan=execution_plan,
+        experiment=experiment,
+    )
 
     start_url = _management_url(f"{experiment_base_path}/start")
     start_payload, start_headers, start_status = _request_json("POST", start_url, headers=headers)
@@ -598,7 +717,8 @@ def execute_chaos_studio_plan(
         "status": _execution_status(latest_execution),
         "createStatusCode": create_status,
         "startStatusCode": start_status,
-        "experiment": create_payload,
+        "experiment": experiment,
+        "roleAssignments": role_assignments,
         "startResponse": start_payload,
         "execution": latest_execution,
         "executionDetails": execution_details,
