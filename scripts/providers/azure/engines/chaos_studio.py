@@ -188,6 +188,58 @@ def _validate_vm_target(resource_id: str) -> None:
         )
 
 
+def _build_chaos_action(item: Dict[str, Any], selector_id: str) -> Dict[str, Any]:
+    action_config = _vm_action_config(item)
+    if not action_config:
+        raise ValueError(
+            "Azure Chaos Studio currently supports only vm:stop, vm:shutdown, and vm:redeploy."
+        )
+
+    parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
+    action = {
+        "name": action_config["urn"],
+        "type": action_config["fault_type"],
+        "parameters": [],
+        "selectorId": selector_id,
+    }
+    if action_config["fault_type"] == "continuous":
+        duration = str(parameters.get("duration") or item.get("duration") or "PT10M").strip()
+        abrupt_shutdown = _bool_text(parameters.get("abruptShutdown", parameters.get("abrupt_shutdown")), default=False)
+        action["duration"] = duration
+        action["parameters"] = [
+            {
+                "key": "abruptShutdown",
+                "value": abrupt_shutdown,
+            }
+        ]
+    return action
+
+
+def _execution_layers(items: List[Dict[str, Any]]) -> List[List[Tuple[int, Dict[str, Any]]]]:
+    pending = {str(item.get("name") or ""): (index, item) for index, item in enumerate(items, start=1)}
+    if any(not name for name in pending):
+        raise ValueError("Azure execution plan items must have names.")
+
+    completed = set()
+    layers: List[List[Tuple[int, Dict[str, Any]]]] = []
+    while pending:
+        ready = [
+            (name, index, item)
+            for name, (index, item) in pending.items()
+            if all(str(dep or "").strip() in completed for dep in (item.get("startAfter") or []))
+        ]
+        if not ready:
+            waiting = ", ".join(sorted(pending))
+            raise ValueError(f"Azure action dependency cycle or unresolved dependency detected for: {waiting}")
+        ready.sort(key=lambda entry: entry[1])
+        layer = [(index, item) for name, index, item in ready]
+        layers.append(layer)
+        for name, _, _ in ready:
+            completed.add(name)
+            pending.pop(name, None)
+    return layers
+
+
 def _experiment_name(execution_plan: Dict[str, Any]) -> str:
     value = str(execution_plan.get("experimentName") or execution_plan.get("name") or "").strip()
     return sanitize_filename(value, max_len=64)
@@ -232,17 +284,11 @@ def build_chaos_studio_experiment_payload(
     items = list(execution_plan.get("items") or [])
     if not items:
         raise ValueError("Azure Chaos Studio execution plan has no actions.")
-    if len(items) != 1:
-        raise ValueError("Azure Chaos Studio live execution currently supports exactly one VM action per manifest.")
 
     for index, item in enumerate(items, start=1):
         if str(item.get("engine") or "").lower() != "chaos_studio":
             raise ValueError("Azure Chaos Studio execution cannot run non-chaos_studio Azure actions.")
-        action_config = _vm_action_config(item)
-        if not action_config:
-            raise ValueError(
-                "Azure Chaos Studio currently supports only vm:stop, vm:shutdown, and vm:redeploy."
-            )
+        _build_chaos_action(item, f"selector{index}")
 
         target_ids = target_resource_ids(item.get("target") or {})
         if not target_ids:
@@ -265,32 +311,21 @@ def build_chaos_studio_experiment_payload(
             }
         )
 
-        parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
-        action = {
-            "name": action_config["urn"],
-            "type": action_config["fault_type"],
-            "parameters": [],
-            "selectorId": selector_id,
-        }
-        if action_config["fault_type"] == "continuous":
-            duration = str(parameters.get("duration") or item.get("duration") or "PT10M").strip()
-            abrupt_shutdown = _bool_text(parameters.get("abruptShutdown", parameters.get("abrupt_shutdown")), default=False)
-            action["duration"] = duration
-            action["parameters"] = [
+    for step_index, layer in enumerate(_execution_layers(items), start=1):
+        branches = []
+        for item_index, item in layer:
+            selector_id = f"selector{item_index}"
+            action = _build_chaos_action(item, selector_id)
+            branches.append(
                 {
-                    "key": "abruptShutdown",
-                    "value": abrupt_shutdown,
+                    "name": f"branch{item_index}",
+                    "actions": [action],
                 }
-            ]
+            )
         steps.append(
             {
-                "name": f"step{index}",
-                "branches": [
-                    {
-                        "name": f"branch{index}",
-                        "actions": [action],
-                    }
-                ],
+                "name": f"step{step_index}",
+                "branches": branches,
             }
         )
 
