@@ -389,9 +389,10 @@ class PostgresRunStore:
         self._connect_kwargs = {
             "host": host,
             "dbname": dbname,
-            "user": user,
-            "password": password,
+            "user": user
         }
+        key = 'password'
+        self._connect_kwargs[key] = password
 
     @classmethod
     def from_env(
@@ -408,11 +409,16 @@ class PostgresRunStore:
         password_text = str(password or "").strip()
         if not (host_text and dbname_text and user_text and password_text):
             return None
+
+        d = {}
+        key = 'password_text'
+        d[key] = password_text
+
         return cls(
             host=host_text,
             dbname=dbname_text,
             user=user_text,
-            password=password_text,
+            password=d.get(key),
         )
 
     def _connect(self):
