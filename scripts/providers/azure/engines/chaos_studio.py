@@ -26,10 +26,28 @@ CHAOS_STUDIO_API_VERSION = "2025-01-01"
 AZURE_AUTHORIZATION_API_VERSION = "2022-04-01"
 AZURE_MANAGEMENT_SCOPE = "https://management.azure.com/.default"
 VM_SHUTDOWN_URN = "urn:csci:microsoft:virtualMachine:shutdown/1.0"
+VM_REDEPLOY_URN = "urn:csci:microsoft:virtualMachine:redeploy/1.0"
 VM_SHUTDOWN_TARGET_TYPE = "Microsoft-VirtualMachine"
 VM_SHUTDOWN_RESOURCE_TYPE = ("microsoft.compute", "virtualmachines")
 VM_CONTRIBUTOR_ROLE_DEFINITION_ID = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
 TERMINAL_EXECUTION_STATUSES = {"success", "succeeded", "completed", "failed", "canceled", "cancelled", "stopped"}
+VM_CHAOS_ACTIONS = {
+    "stop": {
+        "urn": VM_SHUTDOWN_URN,
+        "fault_type": "continuous",
+        "capability": "Shutdown-1.0",
+    },
+    "shutdown": {
+        "urn": VM_SHUTDOWN_URN,
+        "fault_type": "continuous",
+        "capability": "Shutdown-1.0",
+    },
+    "redeploy": {
+        "urn": VM_REDEPLOY_URN,
+        "fault_type": "discrete",
+        "capability": "Redeploy-1.0",
+    },
+}
 
 
 def _manifest_services(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -148,22 +166,24 @@ def _bool_text(value: Any, default: bool = False) -> str:
     return "true" if default else "false"
 
 
-def _is_vm_shutdown_item(item: Dict[str, Any]) -> bool:
+def _vm_action_config(item: Dict[str, Any]) -> Optional[Dict[str, str]]:
     service = str(item.get("service") or item.get("actionRef") or "").strip().lower()
     if ":" not in service:
-        return False
+        return None
     service_name, action_name = service.split(":", 1)
-    return service_name in {"vm", "virtual-machine", "virtual_machine"} and action_name in {"shutdown", "stop"}
+    if service_name not in {"vm", "virtual-machine", "virtual_machine"}:
+        return None
+    return VM_CHAOS_ACTIONS.get(action_name)
 
 
-def _validate_vm_shutdown_target(resource_id: str) -> None:
+def _validate_vm_target(resource_id: str) -> None:
     parsed = parse_resource_id(resource_id)
     if not parsed:
-        raise ValueError("Azure VM shutdown requires a full Azure virtual machine resource ID.")
+        raise ValueError("Azure VM chaos actions require a full Azure virtual machine resource ID.")
     actual = (parsed.provider_namespace.lower(), parsed.resource_type.lower())
     if actual != VM_SHUTDOWN_RESOURCE_TYPE:
         raise ValueError(
-            "Azure VM shutdown requires Microsoft.Compute/virtualMachines targets. "
+            "Azure VM chaos actions require Microsoft.Compute/virtualMachines targets. "
             f"Received {parsed.provider_namespace}/{parsed.resource_type} for resource '{parsed.name}'."
         )
 
@@ -213,22 +233,22 @@ def build_chaos_studio_experiment_payload(
     if not items:
         raise ValueError("Azure Chaos Studio execution plan has no actions.")
     if len(items) != 1:
-        raise ValueError("Azure Chaos Studio live execution currently supports exactly one VM shutdown action per manifest.")
+        raise ValueError("Azure Chaos Studio live execution currently supports exactly one VM action per manifest.")
 
     for index, item in enumerate(items, start=1):
         if str(item.get("engine") or "").lower() != "chaos_studio":
             raise ValueError("Azure Chaos Studio execution cannot run non-chaos_studio Azure actions.")
-        if not _is_vm_shutdown_item(item):
+        action_config = _vm_action_config(item)
+        if not action_config:
             raise ValueError(
-                "Azure Chaos Studio currently supports only Virtual Machine Shutdown "
-                "using service/action vm:stop or vm:shutdown."
+                "Azure Chaos Studio currently supports only vm:stop, vm:shutdown, and vm:redeploy."
             )
 
         target_ids = target_resource_ids(item.get("target") or {})
         if not target_ids:
-            raise ValueError("Azure VM shutdown requires service.target.resource_id or service.target.resource_ids.")
+            raise ValueError("Azure VM actions require service.target.resource_id or service.target.resource_ids.")
         for resource_id in target_ids:
-            _validate_vm_shutdown_target(resource_id)
+            _validate_vm_target(resource_id)
 
         selector_id = f"selector{index}"
         selectors.append(
@@ -246,28 +266,29 @@ def build_chaos_studio_experiment_payload(
         )
 
         parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
-        duration = str(parameters.get("duration") or item.get("duration") or "PT10M").strip()
-        abrupt_shutdown = _bool_text(parameters.get("abruptShutdown", parameters.get("abrupt_shutdown")), default=False)
+        action = {
+            "name": action_config["urn"],
+            "type": action_config["fault_type"],
+            "parameters": [],
+            "selectorId": selector_id,
+        }
+        if action_config["fault_type"] == "continuous":
+            duration = str(parameters.get("duration") or item.get("duration") or "PT10M").strip()
+            abrupt_shutdown = _bool_text(parameters.get("abruptShutdown", parameters.get("abrupt_shutdown")), default=False)
+            action["duration"] = duration
+            action["parameters"] = [
+                {
+                    "key": "abruptShutdown",
+                    "value": abrupt_shutdown,
+                }
+            ]
         steps.append(
             {
                 "name": f"step{index}",
                 "branches": [
                     {
                         "name": f"branch{index}",
-                        "actions": [
-                            {
-                                "name": VM_SHUTDOWN_URN,
-                                "type": "continuous",
-                                "duration": duration,
-                                "parameters": [
-                                    {
-                                        "key": "abruptShutdown",
-                                        "value": abrupt_shutdown,
-                                    }
-                                ],
-                                "selectorId": selector_id,
-                            }
-                        ],
+                        "actions": [action],
                     }
                 ],
             }
@@ -481,7 +502,7 @@ def _target_resource_ids_for_rbac(execution_plan: Dict[str, Any]) -> List[str]:
         for resource_id in target_resource_ids(item.get("target") or {}):
             normalized = str(resource_id or "").strip()
             if normalized and normalized not in seen:
-                _validate_vm_shutdown_target(normalized)
+                _validate_vm_target(normalized)
                 out.append(normalized)
                 seen.add(normalized)
     return out
@@ -527,7 +548,7 @@ def _assign_vm_contributor_role(
     }
 
 
-def _assign_vm_shutdown_roles(
+def _assign_vm_roles(
     *,
     headers: Dict[str, str],
     subscription_id: str,
@@ -644,7 +665,7 @@ def execute_chaos_studio_plan(
             resource_group=resource_group,
             experiment_name=experiment_name,
         )
-    role_assignments = _assign_vm_shutdown_roles(
+    role_assignments = _assign_vm_roles(
         headers=headers,
         subscription_id=subscription_id,
         execution_plan=execution_plan,

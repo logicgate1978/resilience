@@ -43,6 +43,6 @@ class VMValidator(BaseServiceValidator):
                 self.fail(
                     context,
                     f"Chaos Studio target {VM_SHUTDOWN_TARGET_TYPE} was not found for {resource_label(resource_id)}. "
-                    "Onboard the VM to Chaos Studio before running vm:stop. "
+                    f"Onboard the VM to Chaos Studio before running {context.action_key}. "
                     f"Details: {exc}",
                 )

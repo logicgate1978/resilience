@@ -7,3 +7,7 @@ actions:
     validations:
       - verify_vm_exists
       - verify_chaos_target_exists
+  - action: vm:redeploy
+    validations:
+      - verify_vm_exists
+      - verify_chaos_target_exists

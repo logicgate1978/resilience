@@ -1690,13 +1690,14 @@ Azure runtime behavior:
 - When a target uses a full Azure resource ID, the tool validates that the resource belongs to the requested subscription.
 - When `resource_group` is omitted but the target has a full resource ID, the resource group is derived from that ID for the dry-run plan.
 - Azure authentication uses `DefaultAzureCredential` for non-dry-run execution. Credentials are not requested during dry-run planning.
-- The first supported live Chaos Studio action is `vm:stop` / `vm:shutdown`, which maps to Azure Chaos Studio Virtual Machine Shutdown.
-- VM shutdown requires `service.target.resource_id` or `service.target.resource_ids` with full `Microsoft.Compute/virtualMachines` resource IDs.
-- The VM must already be onboarded to Chaos Studio with the `Microsoft-VirtualMachine` target and shutdown capability available.
+- Supported live Chaos Studio VM actions are `vm:stop` / `vm:shutdown` for Virtual Machine Shutdown and `vm:redeploy` for Virtual Machine Redeploy.
+- VM actions require `service.target.resource_id` or `service.target.resource_ids` with full `Microsoft.Compute/virtualMachines` resource IDs.
+- The VM must already be onboarded to Chaos Studio with the `Microsoft-VirtualMachine` target and required capability available.
 - For live VM shutdown, the tool creates/updates the experiment with a system-assigned identity, assigns that identity `Virtual Machine Contributor` on each target VM, then starts the experiment.
 - The ADO pipeline identity must be allowed to create role assignments at the target VM scope, for example through `Owner` or `User Access Administrator`.
-- Azure actions must have pre-execution validations before they are enabled. For `vm:stop` / `vm:shutdown`, the tool validates that the VM exists and that the Chaos Studio `Microsoft-VirtualMachine` target exists before planning/execution continues.
+- Azure actions must have pre-execution validations before they are enabled. For `vm:stop` / `vm:shutdown` / `vm:redeploy`, the tool validates that the VM exists and that the Chaos Studio `Microsoft-VirtualMachine` target exists before planning/execution continues.
 - Optional VM shutdown parameter: `abruptShutdown` or `abrupt_shutdown`, defaulting to `false`.
+- Azure VM Redeploy is throttled by Azure within a 10-hour interval; if Azure returns a redeploy throttling error, wait before retrying.
 - Unsupported Azure Chaos Studio actions fail closed until they are explicitly implemented.
 
 To run the VM shutdown experiment after PSS approval:
