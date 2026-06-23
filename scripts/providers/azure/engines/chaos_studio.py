@@ -32,6 +32,7 @@ VM_SHUTDOWN_RESOURCE_TYPE = ("microsoft.compute", "virtualmachines")
 VM_CONTRIBUTOR_ROLE_DEFINITION_ID = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
 ROLE_ASSIGNMENT_READ_TIMEOUT_SECONDS = 60
 ROLE_ASSIGNMENT_READ_POLL_SECONDS = 5
+RBAC_PROPAGATION_WAIT_SECONDS_DEFAULT = 90
 EXPERIMENT_IDENTITY_TIMEOUT_SECONDS = 120
 EXPERIMENT_IDENTITY_POLL_SECONDS = 5
 ZERO_PRINCIPAL_ID = "00000000-0000-0000-0000-000000000000"
@@ -544,6 +545,16 @@ def _experiment_principal_id(experiment: Dict[str, Any]) -> str:
     return str(identity.get("principalId") or identity.get("principal_id") or "").strip()
 
 
+def _int_env(name: str, default: int) -> int:
+    value = str(os.environ.get(name) or "").strip()
+    if not value:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 def _is_real_principal_id(principal_id: str) -> bool:
     value = str(principal_id or "").strip().lower()
     return bool(value) and value != ZERO_PRINCIPAL_ID
@@ -897,7 +908,7 @@ def _assign_vm_contributor_role(
             scope_label=scope_label,
             role_definition_id=role_definition_id,
             principal_id=principal_id,
-            status_code="existing",
+            status_code="existing-after-conflict",
             response={"warning": str(exc)},
             visible_assignment=visible_assignment,
         )
@@ -978,6 +989,32 @@ def _write_role_assignment_diagnostics(
         f.write(pretty(diagnostic))
     log_message("OK", f"Wrote Azure role assignment diagnostics: {path}")
     return path
+
+
+def _role_assignments_need_propagation_wait(role_assignments: List[Dict[str, Any]]) -> bool:
+    for assignment in role_assignments:
+        status_code = str(assignment.get("statusCode") or "").strip().lower()
+        if status_code and status_code != "existing":
+            return True
+    return False
+
+
+def _wait_for_rbac_propagation_if_needed(role_assignments: List[Dict[str, Any]]) -> int:
+    if not _role_assignments_need_propagation_wait(role_assignments):
+        return 0
+    wait_seconds = max(0, _int_env("AZURE_RBAC_PROPAGATION_WAIT_SECONDS", RBAC_PROPAGATION_WAIT_SECONDS_DEFAULT))
+    if wait_seconds <= 0:
+        log_message(
+            "WARN",
+            "Skipping Azure RBAC propagation wait because AZURE_RBAC_PROPAGATION_WAIT_SECONDS is 0.",
+        )
+        return 0
+    log_message(
+        "INFO",
+        f"Waiting {wait_seconds}s for Azure RBAC propagation before starting the Chaos Studio experiment.",
+    )
+    time.sleep(wait_seconds)
+    return wait_seconds
 
 
 def _get_execution(
@@ -1090,6 +1127,7 @@ def execute_chaos_studio_plan(
         experiment=experiment,
         role_assignments=role_assignments,
     )
+    rbac_propagation_wait_seconds = _wait_for_rbac_propagation_if_needed(role_assignments)
     verified_targets = _verify_chaos_targets_for_execution(
         headers=headers,
         execution_plan=execution_plan,
@@ -1165,6 +1203,7 @@ def execute_chaos_studio_plan(
         "experiment": experiment,
         "roleAssignments": role_assignments,
         "roleAssignmentsPath": role_assignments_path,
+        "rbacPropagationWaitSeconds": rbac_propagation_wait_seconds,
         "verifiedTargets": verified_targets,
         "startResponse": start_payload,
         "execution": latest_execution,
