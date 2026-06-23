@@ -585,6 +585,28 @@ def _get_role_assignment(
     return payload
 
 
+def _list_role_assignments_for_principal(
+    *,
+    headers: Dict[str, str],
+    scope: str,
+    principal_id: str,
+) -> List[Dict[str, Any]]:
+    path = f"{scope}/providers/Microsoft.Authorization/roleAssignments"
+    filter_text = f"principalId eq '{principal_id}'"
+    query = "$filter=" + quote(filter_text, safe="'")
+    url = _authorization_url(path, query=query)
+    assignments: List[Dict[str, Any]] = []
+    while url:
+        payload, _, _ = _request_json("GET", url, headers=headers)
+        assignments.extend(
+            assignment
+            for assignment in payload.get("value") or []
+            if isinstance(assignment, dict)
+        )
+        url = str(payload.get("nextLink") or "").strip()
+    return assignments
+
+
 def _role_assignment_properties(assignment: Dict[str, Any]) -> Dict[str, Any]:
     return assignment.get("properties") if isinstance(assignment.get("properties"), dict) else {}
 
@@ -616,6 +638,56 @@ def _validate_role_assignment(
             "Azure role assignment verification failed: "
             f"expected roleDefinitionId '{expected_role_definition_id}', received '{props.get('roleDefinitionId')}'."
         )
+
+
+def _find_matching_role_assignment(
+    *,
+    headers: Dict[str, str],
+    scope: str,
+    principal_id: str,
+    role_definition_id: str,
+) -> Optional[Dict[str, Any]]:
+    for assignment in _list_role_assignments_for_principal(
+        headers=headers,
+        scope=scope,
+        principal_id=principal_id,
+    ):
+        try:
+            _validate_role_assignment(
+                assignment=assignment,
+                expected_scope=scope,
+                expected_principal_id=principal_id,
+                expected_role_definition_id=role_definition_id,
+            )
+        except RuntimeError:
+            continue
+        return assignment
+    return None
+
+
+def _wait_for_matching_role_assignment(
+    *,
+    headers: Dict[str, str],
+    scope: str,
+    principal_id: str,
+    role_definition_id: str,
+) -> Dict[str, Any]:
+    start = time.time()
+    while True:
+        assignment = _find_matching_role_assignment(
+            headers=headers,
+            scope=scope,
+            principal_id=principal_id,
+            role_definition_id=role_definition_id,
+        )
+        if assignment:
+            return assignment
+        if time.time() - start > ROLE_ASSIGNMENT_READ_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                f"Timed out waiting for existing Azure role assignment to become readable: "
+                f"scope={scope}, principalId={principal_id}, roleDefinitionId={role_definition_id}"
+            )
+        time.sleep(ROLE_ASSIGNMENT_READ_POLL_SECONDS)
 
 
 def _wait_for_role_assignment_visible(
@@ -653,6 +725,39 @@ def _wait_for_role_assignment_visible(
         time.sleep(ROLE_ASSIGNMENT_READ_POLL_SECONDS)
 
 
+def _is_role_assignment_exists_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "status=409" in text and "RoleAssignmentExists" in text
+
+
+def _role_assignment_summary(
+    *,
+    scope: str,
+    scope_label: str,
+    role_definition_id: str,
+    principal_id: str,
+    status_code: Any,
+    response: Dict[str, Any],
+    visible_assignment: Dict[str, Any],
+) -> Dict[str, Any]:
+    visible_props = _role_assignment_properties(visible_assignment)
+    return {
+        "scope": scope,
+        "scopeLabel": scope_label,
+        "roleAssignmentName": str(visible_assignment.get("name") or "").strip(),
+        "roleAssignmentId": visible_assignment.get("id"),
+        "roleDefinitionId": role_definition_id,
+        "principalId": principal_id,
+        "statusCode": status_code,
+        "verified": bool(visible_assignment.get("id")),
+        "verifiedPrincipalId": visible_props.get("principalId"),
+        "verifiedRoleDefinitionId": visible_props.get("roleDefinitionId"),
+        "verifiedScope": visible_assignment.get("scope") or visible_props.get("scope"),
+        "response": response,
+        "verifiedResponse": visible_assignment,
+    }
+
+
 def _assign_vm_contributor_role(
     *,
     headers: Dict[str, str],
@@ -663,6 +768,28 @@ def _assign_vm_contributor_role(
     experiment_id: str,
 ) -> Dict[str, Any]:
     role_definition_id = _role_definition_id(subscription_id, VM_CONTRIBUTOR_ROLE_DEFINITION_ID)
+    existing_assignment = _find_matching_role_assignment(
+        headers=headers,
+        scope=scope,
+        principal_id=principal_id,
+        role_definition_id=role_definition_id,
+    )
+    if existing_assignment:
+        log_message(
+            "OK",
+            f"Reusing existing Virtual Machine Contributor assignment for experiment identity at {scope_label} "
+            f"(roleAssignment={existing_assignment.get('name') or existing_assignment.get('id')}, principalId={principal_id}).",
+        )
+        return _role_assignment_summary(
+            scope=scope,
+            scope_label=scope_label,
+            role_definition_id=role_definition_id,
+            principal_id=principal_id,
+            status_code="existing",
+            response=existing_assignment,
+            visible_assignment=existing_assignment,
+        )
+
     assignment_name = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
@@ -677,7 +804,32 @@ def _assign_vm_contributor_role(
             "principalType": "ServicePrincipal",
         }
     }
-    payload, _, status_code = _request_json("PUT", _authorization_url(path), headers=headers, json_body=body)
+    try:
+        payload, _, status_code = _request_json("PUT", _authorization_url(path), headers=headers, json_body=body)
+    except RuntimeError as exc:
+        if not _is_role_assignment_exists_error(exc):
+            raise
+        visible_assignment = _wait_for_matching_role_assignment(
+            headers=headers,
+            scope=scope,
+            principal_id=principal_id,
+            role_definition_id=role_definition_id,
+        )
+        log_message(
+            "OK",
+            f"Reusing existing Virtual Machine Contributor assignment for experiment identity at {scope_label} "
+            f"(roleAssignment={visible_assignment.get('name') or visible_assignment.get('id')}, principalId={principal_id}).",
+        )
+        return _role_assignment_summary(
+            scope=scope,
+            scope_label=scope_label,
+            role_definition_id=role_definition_id,
+            principal_id=principal_id,
+            status_code="existing",
+            response={"warning": str(exc)},
+            visible_assignment=visible_assignment,
+        )
+
     visible_assignment = _wait_for_role_assignment_visible(
         headers=headers,
         scope=scope,
@@ -685,27 +837,22 @@ def _assign_vm_contributor_role(
         principal_id=principal_id,
         role_definition_id=role_definition_id,
     )
-    visible_props = _role_assignment_properties(visible_assignment)
     log_message(
         "OK",
         f"Assigned Virtual Machine Contributor to experiment identity at {scope_label} "
         f"(roleAssignment={assignment_name}, principalId={principal_id}, status={status_code}).",
     )
-    return {
-        "scope": scope,
-        "scopeLabel": scope_label,
-        "roleAssignmentName": assignment_name,
-        "roleAssignmentId": visible_assignment.get("id"),
-        "roleDefinitionId": role_definition_id,
-        "principalId": principal_id,
-        "statusCode": status_code,
-        "verified": bool(visible_assignment.get("id")),
-        "verifiedPrincipalId": visible_props.get("principalId"),
-        "verifiedRoleDefinitionId": visible_props.get("roleDefinitionId"),
-        "verifiedScope": visible_assignment.get("scope") or visible_props.get("scope"),
-        "response": payload,
-        "verifiedResponse": visible_assignment,
-    }
+    summary = _role_assignment_summary(
+        scope=scope,
+        scope_label=scope_label,
+        role_definition_id=role_definition_id,
+        principal_id=principal_id,
+        status_code=status_code,
+        response=payload,
+        visible_assignment=visible_assignment,
+    )
+    summary["roleAssignmentName"] = assignment_name
+    return summary
 
 
 def _assign_vm_roles(
