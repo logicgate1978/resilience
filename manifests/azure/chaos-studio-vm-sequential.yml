@@ -2,8 +2,8 @@ provider: azure
 engine: chaos_studio
 
 # Replace these placeholders before running against Azure.
-subscription_id: 00000000-0000-0000-0000-000000000000
-resource_group: rg-resilience-test
+subscription_id: 56d222cf-9c2d-415a-beb7-c1d8bb317df2
+resource_group: test-rg
 location: eastus
 
 services:
@@ -11,9 +11,9 @@ services:
   action: stop
   description: Shut down the first VM through Azure Chaos Studio.
   target:
-    resource_id: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-resilience-test/providers/Microsoft.Compute/virtualMachines/vm-resilience-01
+    resource_id: /subscriptions/56d222cf-9c2d-415a-beb7-c1d8bb317df2/resourceGroups/test-rg/providers/Microsoft.Compute/virtualMachines/test-vm-01
   parameters:
-    duration: PT5M
+    duration: PT2M
     abruptShutdown: false
 
 - name: vm
@@ -21,14 +21,4 @@ services:
   description: Redeploy the second VM after the shutdown action completes.
   start_after: vm:stop
   target:
-    resource_id: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-resilience-test/providers/Microsoft.Compute/virtualMachines/vm-resilience-02
-
-- name: vm
-  action: shutdown
-  description: Shut down the third VM after the redeploy action completes.
-  start_after: vm:redeploy
-  target:
-    resource_id: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-resilience-test/providers/Microsoft.Compute/virtualMachines/vm-resilience-03
-  parameters:
-    duration: PT5M
-    abruptShutdown: false
+    resource_id: /subscriptions/56d222cf-9c2d-415a-beb7-c1d8bb317df2/resourceGroups/test-rg/providers/Microsoft.Compute/virtualMachines/vm-resilience-02
