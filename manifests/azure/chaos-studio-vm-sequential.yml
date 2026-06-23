@@ -4,7 +4,7 @@ engine: chaos_studio
 # Replace these placeholders before running against Azure.
 subscription_id: 56d222cf-9c2d-415a-beb7-c1d8bb317df2
 resource_group: test-rg
-location: eastus
+location: southeastasia
 
 services:
 - name: vm

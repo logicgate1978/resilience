@@ -30,6 +30,8 @@ VM_REDEPLOY_URN = "urn:csci:microsoft:virtualMachine:redeploy/1.0"
 VM_SHUTDOWN_TARGET_TYPE = "Microsoft-VirtualMachine"
 VM_SHUTDOWN_RESOURCE_TYPE = ("microsoft.compute", "virtualmachines")
 VM_CONTRIBUTOR_ROLE_DEFINITION_ID = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
+ROLE_ASSIGNMENT_READ_TIMEOUT_SECONDS = 60
+ROLE_ASSIGNMENT_READ_POLL_SECONDS = 5
 TERMINAL_EXECUTION_STATUSES = {"success", "succeeded", "completed", "failed", "canceled", "cancelled", "stopped"}
 VM_CHAOS_ACTIONS = {
     "stop": {
@@ -462,6 +464,14 @@ def _role_definition_id(subscription_id: str, role_definition_guid: str) -> str:
     return f"/subscriptions/{subscription_id}/providers/Microsoft.Authorization/roleDefinitions/{role_definition_guid}"
 
 
+def _subscription_scope(subscription_id: str) -> str:
+    return f"/subscriptions/{subscription_id}"
+
+
+def _authorization_url(path: str) -> str:
+    return f"https://management.azure.com{path}?api-version={AZURE_AUTHORIZATION_API_VERSION}"
+
+
 def _request_json(method: str, url: str, *, headers: Dict[str, str], json_body: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, str], int]:
     response = requests.request(method, url, headers=headers, json=json_body, timeout=60)
     if response.status_code >= 400:
@@ -543,23 +553,81 @@ def _target_resource_ids_for_rbac(execution_plan: Dict[str, Any]) -> List[str]:
     return out
 
 
+def _rbac_scopes_for_vm_actions(
+    *,
+    subscription_id: str,
+    execution_plan: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    target_ids = _target_resource_ids_for_rbac(execution_plan)
+    if not target_ids:
+        return []
+
+    # Azure VM Chaos Studio faults check both VM-scoped actions and subscription-level
+    # Microsoft.Compute location operations, so VM-scoped RBAC is not sufficient.
+    return [
+        {
+            "scope": _subscription_scope(subscription_id),
+            "label": f"subscription {subscription_id}",
+            "reason": f"{len(target_ids)} VM target(s)",
+        }
+    ]
+
+
+def _get_role_assignment(
+    *,
+    headers: Dict[str, str],
+    scope: str,
+    assignment_name: str,
+) -> Dict[str, Any]:
+    path = f"{scope}/providers/Microsoft.Authorization/roleAssignments/{assignment_name}"
+    payload, _, _ = _request_json("GET", _authorization_url(path), headers=headers)
+    return payload
+
+
+def _wait_for_role_assignment_visible(
+    *,
+    headers: Dict[str, str],
+    scope: str,
+    assignment_name: str,
+) -> Dict[str, Any]:
+    start = time.time()
+    while True:
+        try:
+            assignment = _get_role_assignment(
+                headers=headers,
+                scope=scope,
+                assignment_name=assignment_name,
+            )
+            if assignment.get("id"):
+                return assignment
+        except RuntimeError as exc:
+            if "status=404" not in str(exc):
+                raise
+        if time.time() - start > ROLE_ASSIGNMENT_READ_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                f"Timed out waiting for Azure role assignment to become readable: "
+                f"scope={scope}, roleAssignment={assignment_name}"
+            )
+        time.sleep(ROLE_ASSIGNMENT_READ_POLL_SECONDS)
+
+
 def _assign_vm_contributor_role(
     *,
     headers: Dict[str, str],
     subscription_id: str,
     principal_id: str,
-    target_resource_id: str,
+    scope: str,
+    scope_label: str,
     experiment_id: str,
 ) -> Dict[str, Any]:
     role_definition_id = _role_definition_id(subscription_id, VM_CONTRIBUTOR_ROLE_DEFINITION_ID)
     assignment_name = str(
         uuid.uuid5(
             uuid.NAMESPACE_URL,
-            f"{target_resource_id.lower()}|{experiment_id.lower()}|{role_definition_id.lower()}",
+            f"{scope.lower()}|{experiment_id.lower()}|{role_definition_id.lower()}",
         )
     )
-    path = f"{target_resource_id}/providers/Microsoft.Authorization/roleAssignments/{assignment_name}"
-    url = f"https://management.azure.com{path}?api-version={AZURE_AUTHORIZATION_API_VERSION}"
+    path = f"{scope}/providers/Microsoft.Authorization/roleAssignments/{assignment_name}"
     body = {
         "properties": {
             "roleDefinitionId": role_definition_id,
@@ -567,18 +635,25 @@ def _assign_vm_contributor_role(
             "principalType": "ServicePrincipal",
         }
     }
-    payload, _, status_code = _request_json("PUT", url, headers=headers, json_body=body)
+    payload, _, status_code = _request_json("PUT", _authorization_url(path), headers=headers, json_body=body)
+    visible_assignment = _wait_for_role_assignment_visible(
+        headers=headers,
+        scope=scope,
+        assignment_name=assignment_name,
+    )
     log_message(
         "OK",
-        f"Assigned Virtual Machine Contributor to experiment identity on {resource_label(target_resource_id)} "
+        f"Assigned Virtual Machine Contributor to experiment identity at {scope_label} "
         f"(roleAssignment={assignment_name}, status={status_code}).",
     )
     return {
-        "targetResourceId": target_resource_id,
+        "scope": scope,
+        "scopeLabel": scope_label,
         "roleAssignmentName": assignment_name,
         "roleDefinitionId": role_definition_id,
         "principalId": principal_id,
         "statusCode": status_code,
+        "verified": bool(visible_assignment.get("id")),
         "response": payload,
     }
 
@@ -598,13 +673,17 @@ def _assign_vm_roles(
         raise ValueError("Azure Chaos Studio experiment response did not include an experiment resource ID.")
 
     assignments = []
-    for target_resource_id in _target_resource_ids_for_rbac(execution_plan):
+    for scope_entry in _rbac_scopes_for_vm_actions(
+        subscription_id=subscription_id,
+        execution_plan=execution_plan,
+    ):
         assignments.append(
             _assign_vm_contributor_role(
                 headers=headers,
                 subscription_id=subscription_id,
                 principal_id=principal_id,
-                target_resource_id=target_resource_id,
+                scope=scope_entry["scope"],
+                scope_label=scope_entry["label"],
                 experiment_id=experiment_id,
             )
         )
