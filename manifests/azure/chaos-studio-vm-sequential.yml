@@ -21,4 +21,4 @@ services:
   description: Redeploy the second VM after the shutdown action completes.
   start_after: vm:stop
   target:
-    resource_id: /subscriptions/56d222cf-9c2d-415a-beb7-c1d8bb317df2/resourceGroups/test-rg/providers/Microsoft.Compute/virtualMachines/vm-resilience-02
+    resource_id: /subscriptions/56d222cf-9c2d-415a-beb7-c1d8bb317df2/resourceGroups/test-rg/providers/Microsoft.Compute/virtualMachines/test-vm-01
