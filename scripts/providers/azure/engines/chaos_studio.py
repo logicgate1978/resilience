@@ -468,8 +468,9 @@ def _subscription_scope(subscription_id: str) -> str:
     return f"/subscriptions/{subscription_id}"
 
 
-def _authorization_url(path: str) -> str:
-    return f"https://management.azure.com{path}?api-version={AZURE_AUTHORIZATION_API_VERSION}"
+def _authorization_url(path: str, query: str = "") -> str:
+    base = f"https://management.azure.com{path}?api-version={AZURE_AUTHORIZATION_API_VERSION}"
+    return f"{base}&{query}" if query else base
 
 
 def _request_json(method: str, url: str, *, headers: Dict[str, str], json_body: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, str], int]:
@@ -584,11 +585,46 @@ def _get_role_assignment(
     return payload
 
 
+def _role_assignment_properties(assignment: Dict[str, Any]) -> Dict[str, Any]:
+    return assignment.get("properties") if isinstance(assignment.get("properties"), dict) else {}
+
+
+def _validate_role_assignment(
+    *,
+    assignment: Dict[str, Any],
+    expected_scope: str,
+    expected_principal_id: str,
+    expected_role_definition_id: str,
+) -> None:
+    props = _role_assignment_properties(assignment)
+    actual_scope = str(assignment.get("scope") or props.get("scope") or "").strip().lower()
+    actual_principal_id = str(props.get("principalId") or "").strip().lower()
+    actual_role_definition_id = str(props.get("roleDefinitionId") or "").strip().lower()
+
+    if actual_scope and actual_scope != expected_scope.lower():
+        raise RuntimeError(
+            "Azure role assignment verification failed: "
+            f"expected scope '{expected_scope}', received '{assignment.get('scope') or props.get('scope')}'."
+        )
+    if actual_principal_id != expected_principal_id.lower():
+        raise RuntimeError(
+            "Azure role assignment verification failed: "
+            f"expected principalId '{expected_principal_id}', received '{props.get('principalId')}'."
+        )
+    if actual_role_definition_id != expected_role_definition_id.lower():
+        raise RuntimeError(
+            "Azure role assignment verification failed: "
+            f"expected roleDefinitionId '{expected_role_definition_id}', received '{props.get('roleDefinitionId')}'."
+        )
+
+
 def _wait_for_role_assignment_visible(
     *,
     headers: Dict[str, str],
     scope: str,
     assignment_name: str,
+    principal_id: str,
+    role_definition_id: str,
 ) -> Dict[str, Any]:
     start = time.time()
     while True:
@@ -599,6 +635,12 @@ def _wait_for_role_assignment_visible(
                 assignment_name=assignment_name,
             )
             if assignment.get("id"):
+                _validate_role_assignment(
+                    assignment=assignment,
+                    expected_scope=scope,
+                    expected_principal_id=principal_id,
+                    expected_role_definition_id=role_definition_id,
+                )
                 return assignment
         except RuntimeError as exc:
             if "status=404" not in str(exc):
@@ -640,21 +682,29 @@ def _assign_vm_contributor_role(
         headers=headers,
         scope=scope,
         assignment_name=assignment_name,
+        principal_id=principal_id,
+        role_definition_id=role_definition_id,
     )
+    visible_props = _role_assignment_properties(visible_assignment)
     log_message(
         "OK",
         f"Assigned Virtual Machine Contributor to experiment identity at {scope_label} "
-        f"(roleAssignment={assignment_name}, status={status_code}).",
+        f"(roleAssignment={assignment_name}, principalId={principal_id}, status={status_code}).",
     )
     return {
         "scope": scope,
         "scopeLabel": scope_label,
         "roleAssignmentName": assignment_name,
+        "roleAssignmentId": visible_assignment.get("id"),
         "roleDefinitionId": role_definition_id,
         "principalId": principal_id,
         "statusCode": status_code,
         "verified": bool(visible_assignment.get("id")),
+        "verifiedPrincipalId": visible_props.get("principalId"),
+        "verifiedRoleDefinitionId": visible_props.get("roleDefinitionId"),
+        "verifiedScope": visible_assignment.get("scope") or visible_props.get("scope"),
         "response": payload,
+        "verifiedResponse": visible_assignment,
     }
 
 
@@ -688,6 +738,27 @@ def _assign_vm_roles(
             )
         )
     return assignments
+
+
+def _write_role_assignment_diagnostics(
+    *,
+    outdir: str,
+    experiment_name: str,
+    experiment: Dict[str, Any],
+    role_assignments: List[Dict[str, Any]],
+) -> str:
+    path = os.path.join(outdir, f"azure_role_assignments_{experiment_name}.json")
+    diagnostic = {
+        "experimentName": experiment_name,
+        "experimentId": experiment.get("id"),
+        "experimentIdentity": experiment.get("identity"),
+        "experimentPrincipalId": _experiment_principal_id(experiment),
+        "roleAssignments": role_assignments,
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(pretty(diagnostic))
+    log_message("OK", f"Wrote Azure role assignment diagnostics: {path}")
+    return path
 
 
 def _get_execution(
@@ -779,11 +850,21 @@ def execute_chaos_studio_plan(
             resource_group=resource_group,
             experiment_name=experiment_name,
         )
+    log_message(
+        "INFO",
+        f"Azure Chaos Studio experiment identity principalId={_experiment_principal_id(experiment) or 'unknown'}.",
+    )
     role_assignments = _assign_vm_roles(
         headers=headers,
         subscription_id=subscription_id,
         execution_plan=execution_plan,
         experiment=experiment,
+    )
+    role_assignments_path = _write_role_assignment_diagnostics(
+        outdir=outdir,
+        experiment_name=experiment_name,
+        experiment=experiment,
+        role_assignments=role_assignments,
     )
 
     start_url = _management_url(f"{experiment_base_path}/start")
@@ -854,6 +935,7 @@ def execute_chaos_studio_plan(
         "startStatusCode": start_status,
         "experiment": experiment,
         "roleAssignments": role_assignments,
+        "roleAssignmentsPath": role_assignments_path,
         "startResponse": start_payload,
         "execution": latest_execution,
         "executionDetails": execution_details,
