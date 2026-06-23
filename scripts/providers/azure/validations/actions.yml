@@ -3,11 +3,14 @@ actions:
     validations:
       - verify_vm_exists
       - verify_chaos_target_exists
+      - verify_chaos_capability_exists
   - action: vm:shutdown
     validations:
       - verify_vm_exists
       - verify_chaos_target_exists
+      - verify_chaos_capability_exists
   - action: vm:redeploy
     validations:
       - verify_vm_exists
       - verify_chaos_target_exists
+      - verify_chaos_capability_exists

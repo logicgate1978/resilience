@@ -32,6 +32,9 @@ VM_SHUTDOWN_RESOURCE_TYPE = ("microsoft.compute", "virtualmachines")
 VM_CONTRIBUTOR_ROLE_DEFINITION_ID = "9980e02c-c2be-4d73-94e8-173b1dc7cf3c"
 ROLE_ASSIGNMENT_READ_TIMEOUT_SECONDS = 60
 ROLE_ASSIGNMENT_READ_POLL_SECONDS = 5
+EXPERIMENT_IDENTITY_TIMEOUT_SECONDS = 120
+EXPERIMENT_IDENTITY_POLL_SECONDS = 5
+ZERO_PRINCIPAL_ID = "00000000-0000-0000-0000-000000000000"
 TERMINAL_EXECUTION_STATUSES = {"success", "succeeded", "completed", "failed", "canceled", "cancelled", "stopped"}
 VM_CHAOS_ACTIONS = {
     "stop": {
@@ -541,6 +544,43 @@ def _experiment_principal_id(experiment: Dict[str, Any]) -> str:
     return str(identity.get("principalId") or identity.get("principal_id") or "").strip()
 
 
+def _is_real_principal_id(principal_id: str) -> bool:
+    value = str(principal_id or "").strip().lower()
+    return bool(value) and value != ZERO_PRINCIPAL_ID
+
+
+def _wait_for_experiment_identity(
+    *,
+    headers: Dict[str, str],
+    subscription_id: str,
+    resource_group: str,
+    experiment_name: str,
+) -> Dict[str, Any]:
+    start = time.time()
+    latest: Dict[str, Any] = {}
+    while True:
+        latest = _get_experiment(
+            headers=headers,
+            subscription_id=subscription_id,
+            resource_group=resource_group,
+            experiment_name=experiment_name,
+        )
+        principal_id = _experiment_principal_id(latest)
+        if _is_real_principal_id(principal_id):
+            return latest
+        if time.time() - start > EXPERIMENT_IDENTITY_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                "Timed out waiting for Azure Chaos Studio experiment system-assigned identity "
+                f"to expose a real principalId. Last principalId={principal_id or 'missing'}."
+            )
+        log_message(
+            "INFO",
+            f"Azure Chaos Studio experiment identity principalId is not ready yet "
+            f"(current={principal_id or 'missing'}).",
+        )
+        time.sleep(EXPERIMENT_IDENTITY_POLL_SECONDS)
+
+
 def _target_resource_ids_for_rbac(execution_plan: Dict[str, Any]) -> List[str]:
     out: List[str] = []
     seen = set()
@@ -552,6 +592,38 @@ def _target_resource_ids_for_rbac(execution_plan: Dict[str, Any]) -> List[str]:
                 out.append(normalized)
                 seen.add(normalized)
     return out
+
+
+def _required_chaos_capability(item: Dict[str, Any]) -> str:
+    action_config = _vm_action_config(item)
+    return str((action_config or {}).get("capability") or "").strip()
+
+
+def _verify_chaos_targets_for_execution(
+    *,
+    headers: Dict[str, str],
+    execution_plan: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    verified: List[Dict[str, str]] = []
+    for item in execution_plan.get("items") or []:
+        capability = _required_chaos_capability(item)
+        if not capability:
+            raise ValueError(f"No Azure Chaos Studio capability mapping is configured for {item.get('actionRef') or item.get('service')}.")
+
+        for resource_id in target_resource_ids(item.get("target") or {}):
+            target_id = chaos_target_id(resource_id, VM_SHUTDOWN_TARGET_TYPE)
+            capability_id = f"{target_id}/capabilities/{capability}"
+            _request_json("GET", _management_url(target_id), headers=headers)
+            _request_json("GET", _management_url(capability_id), headers=headers)
+            verified.append(
+                {
+                    "action": str(item.get("actionRef") or item.get("service") or ""),
+                    "targetId": target_id,
+                    "capabilityId": capability_id,
+                    "capability": capability,
+                }
+            )
+    return verified
 
 
 def _rbac_scopes_for_vm_actions(
@@ -989,14 +1061,19 @@ def execute_chaos_studio_plan(
         timeout_seconds=timeout_seconds,
     )
     log_message("OK", f"Created/updated Azure Chaos Studio experiment: {experiment_name}")
-    experiment = create_payload
-    if not _experiment_principal_id(experiment):
-        experiment = _get_experiment(
-            headers=headers,
-            subscription_id=subscription_id,
-            resource_group=resource_group,
-            experiment_name=experiment_name,
+    create_principal_id = _experiment_principal_id(create_payload)
+    if create_principal_id and not _is_real_principal_id(create_principal_id):
+        log_message(
+            "INFO",
+            f"Azure create/update response returned placeholder principalId={create_principal_id}; "
+            "waiting for the real system-assigned identity principalId.",
         )
+    experiment = _wait_for_experiment_identity(
+        headers=headers,
+        subscription_id=subscription_id,
+        resource_group=resource_group,
+        experiment_name=experiment_name,
+    )
     log_message(
         "INFO",
         f"Azure Chaos Studio experiment identity principalId={_experiment_principal_id(experiment) or 'unknown'}.",
@@ -1013,6 +1090,11 @@ def execute_chaos_studio_plan(
         experiment=experiment,
         role_assignments=role_assignments,
     )
+    verified_targets = _verify_chaos_targets_for_execution(
+        headers=headers,
+        execution_plan=execution_plan,
+    )
+    log_message("OK", f"Verified Azure Chaos Studio target capabilities: {len(verified_targets)}.")
 
     start_url = _management_url(f"{experiment_base_path}/start")
     start_payload, start_headers, start_status = _request_json("POST", start_url, headers=headers)
@@ -1083,6 +1165,7 @@ def execute_chaos_studio_plan(
         "experiment": experiment,
         "roleAssignments": role_assignments,
         "roleAssignmentsPath": role_assignments_path,
+        "verifiedTargets": verified_targets,
         "startResponse": start_payload,
         "execution": latest_execution,
         "executionDetails": execution_details,
