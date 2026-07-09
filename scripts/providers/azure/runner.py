@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Callable, Dict, List, Optional
 
 from providers.azure.artifacts import artifact_entry
@@ -10,6 +11,7 @@ from providers.azure.engines.chaos_studio import (
     collect_azure_impacted_resources,
     execute_chaos_studio_plan,
 )
+from providers.azure.observability import parse_observability, start_observability_collectors
 from providers.azure.runtime import create_runtime_context
 from providers.azure.validations import (
     ValidationError,
@@ -115,15 +117,48 @@ def run_azure_manifest(
         log_message("INFO", "Dry-run enabled: skipping Azure create/execute.")
         return 0
 
-    result = execute_chaos_studio_plan(
-        execution_plan=execution_plan,
-        runtime_context=runtime_context,
-        outdir=outdir,
-        poll_seconds=poll_seconds,
-        timeout_seconds=timeout_seconds,
-    )
+    stop_event: Optional[Any] = None
+    obs_results: Optional[Dict[str, Any]] = None
+    obs_threads: List[Any] = []
+
+    try:
+        stop_event, obs_results, obs_threads = start_observability_collectors(
+            manifest=manifest,
+            runtime_context=runtime_context,
+            outdir=outdir,
+            impacted_resources=impacted_resources,
+        )
+        obs_cfg = parse_observability(manifest)
+        start_before_min = int(obs_cfg.get("start_before") or 0)
+        stop_after_min = int(obs_cfg.get("stop_after") or 0)
+
+        if start_before_min > 0:
+            log_message("INFO", f"start_before={start_before_min} minutes: waiting before starting Azure experiment...")
+            time.sleep(start_before_min * 60)
+
+        result = execute_chaos_studio_plan(
+            execution_plan=execution_plan,
+            runtime_context=runtime_context,
+            outdir=outdir,
+            poll_seconds=poll_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+
+        if stop_after_min > 0:
+            log_message("INFO", f"stop_after={stop_after_min} minutes: continuing Azure observability collection...")
+            time.sleep(stop_after_min * 60)
+    finally:
+        if stop_event is not None:
+            stop_event.set()
+        for thread in obs_threads:
+            thread.join(timeout=5)
+
+    if obs_results is not None:
+        result["observability"] = obs_results
     result_path = str(result.get("resultPath") or "").strip()
     if result_path:
+        with open(result_path, "w", encoding="utf-8") as f:
+            f.write(pretty(result))
         artifact_entries.append(artifact_entry("other", local_path=result_path, content_json=result))
     status = str(result.get("status") or "").strip().lower()
     return 0 if status in {"success", "succeeded", "completed"} else 1

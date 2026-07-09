@@ -1696,6 +1696,7 @@ Azure runtime behavior:
 - For live VM actions, the tool creates/updates the experiment with a system-assigned identity, assigns that identity `Virtual Machine Contributor` at the subscription scope, verifies the role assignment can be read back, then starts the experiment. Subscription scope is used because Azure VM Chaos Studio faults check both VM actions and subscription-level Compute location operations.
 - The ADO pipeline identity must be allowed to create role assignments at the subscription scope, for example through `Owner` or `User Access Administrator`.
 - Azure actions must have pre-execution validations before they are enabled. For `vm:stop` / `vm:shutdown` / `vm:redeploy`, the tool validates that the VM exists and that the Chaos Studio `Microsoft-VirtualMachine` target exists before planning/execution continues.
+- Azure observability follows the AWS impacted-resource pattern. Azure Monitor metrics are derived from impacted resources such as selected VMs; app teams do not need to repeat resource IDs under `observability`. The pipeline identity needs Azure Monitor metrics read permission, for example `Monitoring Reader`.
 - Optional VM shutdown parameter: `abruptShutdown` or `abrupt_shutdown`, defaulting to `false`.
 - Azure VM Redeploy is throttled by Azure within a 10-hour interval; if Azure returns a redeploy throttling error, wait before retrying.
 - Unsupported Azure Chaos Studio actions fail closed until they are explicitly implemented.
