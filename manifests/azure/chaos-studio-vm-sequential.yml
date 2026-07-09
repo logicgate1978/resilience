@@ -22,3 +22,9 @@ services:
   start_after: vm:stop
   target:
     resource_id: /subscriptions/56d222cf-9c2d-415a-beb7-c1d8bb317df2/resourceGroups/test-rg/providers/Microsoft.Compute/virtualMachines/test-vm-01
+
+observability:
+  start_before: 2
+  stop_after: 3
+  azure_monitor:
+    enabled: true
